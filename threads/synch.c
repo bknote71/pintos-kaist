@@ -68,9 +68,9 @@ void sema_down(struct semaphore *sema)
     while (sema->value == 0)
     {
         // list_push_back (&sema->waiters, &thread_current ()->elem);
-        // list_insert_ordered(&sema->waiters, &thread_current()->elem, priority_cmp, NULL);
+        list_insert_ordered(&sema->waiters, &thread_current()->elem, priority_cmp, NULL);
         // 기다릴 때, 그냥 기다리면 안된다. 락을 보유한 스레드의 PRI 를 올려줘야 한다.
-		
+
         thread_block();
     }
     sema->value--;

@@ -496,7 +496,7 @@ init_thread(struct thread *t, const char *name, int priority)
 static struct thread *
 next_thread_to_run(void)
 {
-    if (list_empty(&ready_list) || thread_current()->priority > list_entry(list_front(&ready_list), struct thread, elem)->priority)
+    if (list_empty(&ready_list))
         return idle_thread;
     else
         return list_entry(list_pop_front(&ready_list), struct thread, elem);
