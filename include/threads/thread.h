@@ -2,6 +2,7 @@
 #define THREADS_THREAD_H
 
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
@@ -98,6 +99,10 @@ struct thread
 
     /* Wake up tick */
     int64_t wakeup_tick;
+
+    struct lock *wait_on_lock;
+    struct list donations;
+    struct list_elem d_elem;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

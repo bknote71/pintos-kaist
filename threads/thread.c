@@ -279,12 +279,8 @@ void thread_unblock(struct thread *t)
 
     old_level = intr_disable();
     ASSERT(t->status == THREAD_BLOCKED);
-    // list_push_back(&ready_list, &t->elem);
     t->status = THREAD_READY;
     list_insert_ordered(&ready_list, &t->elem, priority_cmp, NULL);
-
-    // unblock 되는 스레드 > 만약 현재 스레드 우선순위
-    // context switch <<
     intr_set_level(old_level);
 }
 
@@ -348,7 +344,6 @@ void thread_yield(void)
 
     old_level = intr_disable();
     if (curr != idle_thread)
-        // list_push_back(&ready_list, &curr->elem);
         list_insert_ordered(&ready_list, &curr->elem, priority_cmp, NULL);
     do_schedule(THREAD_READY);
     intr_set_level(old_level);
@@ -486,6 +481,10 @@ init_thread(struct thread *t, const char *name, int priority)
     t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
     t->priority = priority;
     t->magic = THREAD_MAGIC;
+
+    /* for donations */
+    list_init(&t->donations);
+    t->wait_on_lock = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -496,7 +495,10 @@ init_thread(struct thread *t, const char *name, int priority)
 static struct thread *
 next_thread_to_run(void)
 {
-    if (list_empty(&ready_list))
+    struct thread *run = running_thread();
+    if (list_empty(&ready_list) ||
+        (run->status != THREAD_BLOCKED &&
+         run->priority > list_entry(list_front(&ready_list), struct thread, elem)->priority))
         return idle_thread;
     else
         return list_entry(list_pop_front(&ready_list), struct thread, elem);

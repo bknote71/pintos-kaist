@@ -69,8 +69,6 @@ void sema_down(struct semaphore *sema)
     {
         // list_push_back (&sema->waiters, &thread_current ()->elem);
         list_insert_ordered(&sema->waiters, &thread_current()->elem, priority_cmp, NULL);
-        // 기다릴 때, 그냥 기다리면 안된다. 락을 보유한 스레드의 PRI 를 올려줘야 한다.
-
         thread_block();
     }
     sema->value--;
@@ -193,8 +191,28 @@ void lock_acquire(struct lock *lock)
     ASSERT(!intr_context());
     ASSERT(!lock_held_by_current_thread(lock));
 
-    sema_down(&lock->semaphore);
-    lock->holder = thread_current();
+    // sema_down(&lock->semaphore);
+    struct thread *curr = thread_current();
+    if (!sema_try_down(&lock->semaphore)) // lock is not available
+    {
+        curr->wait_on_lock = lock;
+        struct thread *p;
+        struct thread *q = lock->holder;
+
+        list_insert_ordered(&q->donations, &curr->elem, priority_cmp, NULL);
+        p = list_entry(list_front(&q->donations), struct thread, elem);
+        int pp = p->priority;
+        while (q != NULL)
+        {
+            if (q->priority < pp)
+                q->priority = pp;
+            if (q->wait_on_lock == NULL)
+                break;
+            q = q->wait_on_lock->holder;
+        }
+    }
+    else
+        lock->holder = thread_current();
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -227,6 +245,33 @@ void lock_release(struct lock *lock)
     ASSERT(lock != NULL);
     ASSERT(lock_held_by_current_thread(lock));
 
+    struct thread *curr = thread_current();
+    struct thread *next;
+    struct list_elem *p, *q;
+    int np;
+    for (p = list_begin(&curr->donations); p != list_tail(&curr->donations);)
+    {
+        q = list_next(p);
+        struct thread *nt = list_entry(p, struct thread, d_elem);
+        if (lock == nt->wait_on_lock)
+        {
+            list_remove(p);
+            next = list_entry(list_front(&curr->donations), struct thread, elem);
+            if (next != list_tail(&curr->donations) && nt->priority > (np = next->priority))
+            {
+                struct thread *t1 = next->wait_on_lock->holder;
+                while (t1 != NULL)
+                {
+                    t1->priority = np;
+                    if (t1->wait_on_lock == NULL)
+                        break;
+                    t1 = t1->wait_on_lock->holder;
+                }
+            }
+            break;
+        }
+        p = q;
+    }
     lock->holder = NULL;
     sema_up(&lock->semaphore);
 }
@@ -288,7 +333,6 @@ void cond_wait(struct condition *cond, struct lock *lock)
     ASSERT(lock_held_by_current_thread(lock));
 
     sema_init(&waiter.semaphore, 0);
-    // list_push_back(&cond->waiters, &waiter.elem);
     list_insert_ordered(&cond->waiters, &waiter.elem, priority_cmp, NULL);
     lock_release(lock);
     sema_down(&waiter.semaphore);
