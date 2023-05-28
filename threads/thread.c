@@ -67,6 +67,8 @@ static void do_schedule(int status);
 static void schedule(void);
 static tid_t allocate_tid(void);
 
+// static bool priority_cmp(const struct list_elem *a, const struct list_elem *b,
+//                          void *aux UNUSED);
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -81,6 +83,15 @@ static tid_t allocate_tid(void);
 // Because the gdt will be setup after the thread_init, we should
 // setup temporal gdt first.
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
+
+/* for compareing using priority */
+bool priority_cmp(const struct list_elem *a, const struct list_elem *b,
+                  void *aux UNUSED)
+{
+    const struct thread *t1 = list_entry(a, struct thread, elem);
+    const struct thread *t2 = list_entry(b, struct thread, elem);
+    return t1->priority > t2->priority;
+}
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -163,12 +174,14 @@ void thread_tick(void)
     for (p = list_begin(&sleep_list); p != list_tail(&sleep_list);)
     {
         q = list_next(p);
-        struct thread *t = list_entry(p, struct thread, elem);
-        if (t->status == THREAD_BLOCKED && global_ticks >= t->wakeup_tick)
+        struct thread *nt = list_entry(p, struct thread, elem);
+        if (nt->status == THREAD_BLOCKED && global_ticks >= nt->wakeup_tick)
         {
             // 해당 인자를 제거 후, 레디큐에 넣기
             list_remove(p);
-            thread_unblock(t);
+            thread_unblock(nt);
+            // if (nt->priority > t->priority)
+            //     thread_yield();
         }
         p = q;
     }
@@ -203,6 +216,7 @@ void thread_print_stats(void)
 tid_t thread_create(const char *name, int priority,
                     thread_func *function, void *aux)
 {
+    struct thread *curr = thread_current();
     struct thread *t;
     tid_t tid;
 
@@ -230,7 +244,8 @@ tid_t thread_create(const char *name, int priority,
 
     /* Add to run queue. */
     thread_unblock(t);
-
+    if (t->priority > curr->priority)
+        thread_yield();
     return tid;
 }
 
@@ -264,8 +279,12 @@ void thread_unblock(struct thread *t)
 
     old_level = intr_disable();
     ASSERT(t->status == THREAD_BLOCKED);
-    list_push_back(&ready_list, &t->elem);
+    // list_push_back(&ready_list, &t->elem);
     t->status = THREAD_READY;
+    list_insert_ordered(&ready_list, &t->elem, priority_cmp, NULL);
+
+    // unblock 되는 스레드 > 만약 현재 스레드 우선순위
+    // context switch <<
     intr_set_level(old_level);
 }
 
@@ -329,7 +348,8 @@ void thread_yield(void)
 
     old_level = intr_disable();
     if (curr != idle_thread)
-        list_push_back(&ready_list, &curr->elem);
+        // list_push_back(&ready_list, &curr->elem);
+        list_insert_ordered(&ready_list, &curr->elem, priority_cmp, NULL);
     do_schedule(THREAD_READY);
     intr_set_level(old_level);
 }
@@ -359,6 +379,10 @@ void thread_sleep(int64_t ticks)
 void thread_set_priority(int new_priority)
 {
     thread_current()->priority = new_priority;
+    // 우선순위가 바뀌었으므로, 레디 리스트에 있는 놈들 중에 큰 녀석들이 있을 수 있다.
+    // 앞에 녀석이 크면, 앞에 녀석으로 변경, 아니면 그냥
+    if (list_entry(list_front(&ready_list), struct thread, elem)->priority > new_priority)
+        thread_yield();
 }
 
 /* Returns the current thread's priority. */
@@ -472,7 +496,7 @@ init_thread(struct thread *t, const char *name, int priority)
 static struct thread *
 next_thread_to_run(void)
 {
-    if (list_empty(&ready_list))
+    if (list_empty(&ready_list) || thread_current()->priority > list_entry(list_front(&ready_list), struct thread, elem)->priority)
         return idle_thread;
     else
         return list_entry(list_pop_front(&ready_list), struct thread, elem);
