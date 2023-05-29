@@ -103,6 +103,7 @@ struct thread
     struct lock *wait_on_lock;
     struct list donations;
     struct list_elem d_elem;
+    int org_priority;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -127,7 +128,7 @@ bool priority_cmp(const struct list_elem *a, const struct list_elem *b,
                   void *aux UNUSED);
 bool priority_cmp2(const struct list_elem *a, const struct list_elem *b,
                    void *aux UNUSED);
-
+void priority_yield(void);
 void thread_init(void);
 void thread_start(void);
 

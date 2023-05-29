@@ -101,6 +101,15 @@ bool priority_cmp2(const struct list_elem *a, const struct list_elem *b,
     return t1->priority > t2->priority;
 }
 
+void priority_yield(void)
+{
+    if (!list_empty(&ready_list))
+    {
+        if (list_entry(list_front(&ready_list), struct thread, elem) > thread_current()->priority)
+            thread_yield();
+    }
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -493,6 +502,7 @@ init_thread(struct thread *t, const char *name, int priority)
     /* for donations */
     list_init(&t->donations);
     t->wait_on_lock = NULL;
+    t->org_priority = priority;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
