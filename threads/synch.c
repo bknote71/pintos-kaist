@@ -67,7 +67,6 @@ void sema_down(struct semaphore *sema)
     old_level = intr_disable();
     while (sema->value == 0)
     {
-        // list_push_back (&sema->waiters, &thread_current ()->elem);
         list_insert_ordered(&sema->waiters, &thread_current()->elem, priority_cmp, NULL);
         thread_block();
     }
@@ -193,12 +192,12 @@ void lock_acquire(struct lock *lock)
 
     struct thread *curr = thread_current();
     enum intr_level old_level;
-    while (!sema_try_down(&lock->semaphore))
+    if (lock->holder)
     {
-        old_level = intr_disable();
         curr->wait_on_lock = lock;
         struct thread *p = lock->holder;
         int cp = curr->priority;
+
         while (p != NULL)
         {
             if (cp > p->priority)
@@ -209,13 +208,10 @@ void lock_acquire(struct lock *lock)
                 break;
             p = p->wait_on_lock->holder;
         }
-        // 꼭 있어야 하는지?
+
         list_insert_ordered(&p->donations, &curr->d_elem, priority_cmp2, NULL);
-        list_insert_ordered(&lock->semaphore.waiters, &curr->elem, priority_cmp, NULL);
-        thread_block();
-        list_remove(&curr->d_elem);
-        intr_set_level(old_level);
     }
+    sema_down(&lock->semaphore);
     lock->holder = curr;
     curr->wait_on_lock = NULL;
 }
@@ -250,45 +246,29 @@ void lock_release(struct lock *lock)
     ASSERT(lock != NULL);
     ASSERT(lock_held_by_current_thread(lock));
     enum intr_level old_level;
-    struct thread *curr = lock->holder;
-    lock->holder = NULL;
+
     if (!list_empty(&lock->semaphore.waiters))
     {
-        old_level = intr_disable();
+
+        struct thread *curr = lock->holder;
         struct list donations = curr->donations;
         struct list waiters = lock->semaphore.waiters;
         struct list_elem *e;
-        lock->semaphore.value++;
-        // for (e = list_begin(&donations); e != list_end(&donations);)
-        // {
-        //     if (lock == list_entry(e, struct thread, d_elem)->wait_on_lock)
-        //         e = list_remove(e);
-        //     else
-        //         e = list_next(e);
-        // }
-        while (!list_empty(&waiters))
+
+        for (e = list_begin(&donations); e != list_end(&donations); e = list_next(e))
         {
-            thread_unblock(list_entry(list_pop_front(&waiters), struct thread, elem));
+            struct thread *nt = list_entry(e, struct thread, d_elem);
+            if (lock == nt->wait_on_lock)
+            {
+                list_remove(&nt->d_elem);
+            }
         }
-        intr_set_level(old_level);
+        if (!list_empty(&donations))
+            curr->priority = list_entry(list_front(&donations), struct thread, d_elem);
     }
-    else
-        sema_up(&lock->semaphore);
+    lock->holder = NULL;
+    sema_up(&lock->semaphore);
 }
-
-// void sema_up(struct semaphore *sema)
-// {
-//     enum intr_level old_level;
-
-//     ASSERT(sema != NULL);
-
-//     old_level = intr_disable();
-//     if (!list_empty(&sema->waiters))
-//         thread_unblock(list_entry(list_pop_front(&sema->waiters),
-//                                   struct thread, elem));
-//     sema->value++;
-//     intr_set_level(old_level);
-// }
 
 /* Returns true if the current thread holds LOCK, false
    otherwise.  (Note that testing whether some other thread holds
