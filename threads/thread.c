@@ -24,6 +24,8 @@
    Do not modify this value. */
 #define THREAD_BASIC 0xd42df210
 
+#define MAX(a, b) (a) < (b) ? (b) : (a)
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
@@ -103,7 +105,7 @@ bool priority_cmp2(const struct list_elem *a, const struct list_elem *b,
 
 void priority_yield(void)
 {
-    if (!list_empty(&ready_list))
+    if (thread_current() != idle && !list_empty(&ready_list))
     {
         if (list_entry(list_front(&ready_list), struct thread, elem) > thread_current()->priority)
             thread_yield();
@@ -197,12 +199,9 @@ void thread_tick(void)
             // 해당 인자를 제거 후, 레디큐에 넣기
             list_remove(p);
             thread_unblock(nt);
-            // if (nt->priority > t->priority)
-            //     thread_yield();
         }
         p = q;
     }
-
     /* Enforce preemption. */
     if (++thread_ticks >= TIME_SLICE)
         intr_yield_on_return();
@@ -390,11 +389,13 @@ void thread_sleep(int64_t ticks)
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority)
 {
-    thread_current()->priority = new_priority;
+    struct thread *curr = thread_current();
+    curr->org_priority = new_priority;
+    curr->priority = list_empty(&(curr->donations)) ? curr->org_priority : MAX(curr->priority, new_priority);
     // 우선순위가 바뀌었으므로, 레디 리스트에 있는 놈들 중에 큰 녀석들이 있을 수 있다.
     // 앞에 녀석이 크면, 앞에 녀석으로 변경, 아니면 그냥
     if (!list_empty(&ready_list) &&
-        list_entry(list_front(&ready_list), struct thread, elem)->priority > new_priority)
+        list_entry(list_front(&ready_list), struct thread, elem)->priority > curr->priority)
         thread_yield();
 }
 
