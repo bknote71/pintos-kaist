@@ -206,18 +206,13 @@ void lock_acquire(struct lock *lock)
         cp = curr->priority;
         while (nh != NULL)
         {
-            if (nh->priority < cp)
-            {
-                nh->priority = cp;
-                // list_sort(&(nh->wait_on_lock->semaphore.waiters), priority_cmp, NULL);
-            }
+            nh->priority = MAX(nh->priority, cp);
             if (nh->wait_on_lock == NULL)
                 break;
             nh = nh->wait_on_lock->holder;
         }
         list_insert_ordered(&lock->holder->donations, &curr->d_elem, priority_cmp2, NULL);
     }
-
     sema_down(&lock->semaphore);
     curr->wait_on_lock = NULL;
     lock->holder = curr;
@@ -254,9 +249,7 @@ void lock_release(struct lock *lock)
     ASSERT(lock_held_by_current_thread(lock));
 
     struct thread *curr = thread_current();
-    struct thread *wt;
     struct list *donations = &curr->donations;
-    struct list *waiters = &(lock->semaphore.waiters);
     struct list_elem *e;
 
     for (e = list_begin(donations); e != list_end(donations); e = list_next(e))
@@ -264,11 +257,8 @@ void lock_release(struct lock *lock)
         if (lock == list_entry(e, struct thread, d_elem)->wait_on_lock)
             list_remove(e);
     }
-    if (!list_empty(donations))
-        curr->priority = list_entry(list_front(donations), struct thread, d_elem)->priority;
-    else
-        curr->priority = curr->org_priority;
-
+    curr->priority = list_empty(donations) ? curr->org_priority
+                                           : list_entry(list_front(donations), struct thread, d_elem)->priority;
     lock->holder = NULL;
     sema_up(&lock->semaphore);
 }

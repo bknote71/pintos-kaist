@@ -94,15 +94,7 @@ timer_elapsed(int64_t then)
 void timer_sleep(int64_t ticks)
 {
     int64_t start = timer_ticks();
-
-    // ASSERT(intr_get_level() == INTR_ON);
-    // while (timer_elapsed(start) < ticks)
-    //     thread_yield();
-
-    // thread sleep << 이게 왜 invalid 할 수 있다는 거지?
-    // 아마 스레드.c 내부에서 글로벌 틱을 사용하기 때문에 의미가 없는 듯?
-    if (timer_elapsed(start) < ticks)
-        thread_sleep(start + ticks);
+    thread_sleep(start + ticks);
 }
 
 /* Suspends execution for approximately MS milliseconds. */

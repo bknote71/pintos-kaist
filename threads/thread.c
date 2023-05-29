@@ -187,10 +187,10 @@ void thread_tick(void)
     // 글로벌 틱 증가
     global_ticks++;
     // 모든 sleeping list 를 순회하면서 if (g tick >= w tick) 이면 무빙
-    struct list_elem *p;
-    struct list_elem *q;
+    struct list *sl = &sleep_list;
+    struct list_elem *p, *q;
 
-    for (p = list_begin(&sleep_list); p != list_tail(&sleep_list);)
+    for (p = list_begin(sl); p != list_end(sl);)
     {
         q = list_next(p);
         struct thread *nt = list_entry(p, struct thread, elem);
@@ -368,8 +368,8 @@ void thread_yield(void)
 /* Sleep Thread */
 void thread_sleep(int64_t ticks)
 {
-    // if (global_ticks >= ticks)
-    //     return;
+    if (global_ticks >= ticks)
+        return;
     struct thread *curr = thread_current();
     enum intr_level old_level;
 
@@ -378,7 +378,6 @@ void thread_sleep(int64_t ticks)
     old_level = intr_disable();
     if (curr != idle_thread)
     {
-        // tick 정보 추가
         curr->wakeup_tick = ticks;
         list_push_back(&sleep_list, &curr->elem);
     }
@@ -391,7 +390,8 @@ void thread_set_priority(int new_priority)
 {
     struct thread *curr = thread_current();
     curr->org_priority = new_priority;
-    curr->priority = list_empty(&(curr->donations)) ? curr->org_priority : MAX(curr->priority, new_priority);
+    curr->priority = list_empty(&(curr->donations)) ? curr->org_priority
+                                                    : MAX(curr->priority, new_priority);
     // 우선순위가 바뀌었으므로, 레디 리스트에 있는 놈들 중에 큰 녀석들이 있을 수 있다.
     // 앞에 녀석이 크면, 앞에 녀석으로 변경, 아니면 그냥
     if (!list_empty(&ready_list) &&
