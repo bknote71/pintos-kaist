@@ -96,13 +96,13 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem; /* List element. */
+    struct list_elem d_elem;
 
     /* Wake up tick */
     int64_t wakeup_tick;
 
     struct lock *wait_on_lock;
     struct list donations;
-    struct list_elem d_elem;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

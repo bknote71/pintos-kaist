@@ -384,7 +384,8 @@ void thread_set_priority(int new_priority)
     thread_current()->priority = new_priority;
     // 우선순위가 바뀌었으므로, 레디 리스트에 있는 놈들 중에 큰 녀석들이 있을 수 있다.
     // 앞에 녀석이 크면, 앞에 녀석으로 변경, 아니면 그냥
-    if (list_entry(list_front(&ready_list), struct thread, elem)->priority > new_priority)
+    if (!list_empty(&ready_list) &&
+        list_entry(list_front(&ready_list), struct thread, elem)->priority > new_priority)
         thread_yield();
 }
 
