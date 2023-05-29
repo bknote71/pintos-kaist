@@ -93,6 +93,14 @@ bool priority_cmp(const struct list_elem *a, const struct list_elem *b,
     return t1->priority > t2->priority;
 }
 
+bool priority_cmp2(const struct list_elem *a, const struct list_elem *b,
+                   void *aux UNUSED)
+{
+    const struct thread *t1 = list_entry(a, struct thread, d_elem);
+    const struct thread *t2 = list_entry(b, struct thread, d_elem);
+    return t1->priority > t2->priority;
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
