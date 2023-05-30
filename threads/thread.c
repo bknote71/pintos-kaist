@@ -103,13 +103,19 @@ bool priority_cmp2(const struct list_elem *a, const struct list_elem *b,
     return t1->priority > t2->priority;
 }
 
+static bool sleep_sort(const struct list_elem *a, const struct list_elem *b,
+                       void *aux UNUSED)
+{
+    const struct thread *t1 = list_entry(a, struct thread, elem);
+    const struct thread *t2 = list_entry(b, struct thread, elem);
+    return t1->wakeup_tick < t2->wakeup_tick;
+}
+
 void priority_yield(void)
 {
-    if (thread_current() != idle && !list_empty(&ready_list))
-    {
-        if (list_entry(list_front(&ready_list), struct thread, elem) > thread_current()->priority)
-            thread_yield();
-    }
+    if (!list_empty(&ready_list) &&
+        list_entry(list_front(&ready_list), struct thread, elem) > thread_current()->priority)
+        thread_yield();
 }
 
 /* Initializes the threading system by transforming the code
@@ -196,6 +202,8 @@ void thread_tick(void)
             list_remove(e);
             thread_unblock(nt);
         }
+        else
+            break;
     }
     /* Enforce preemption. */
     if (++thread_ticks >= TIME_SLICE)
@@ -374,7 +382,7 @@ void thread_sleep(int64_t ticks)
     if (curr != idle_thread)
     {
         curr->wakeup_tick = ticks;
-        list_push_back(&sleep_list, &curr->elem);
+        list_insert_ordered(&sleep_list, &curr->elem, sleep_sort, NULL);
     }
     do_schedule(THREAD_BLOCKED);
     intr_set_level(old_level);
@@ -389,9 +397,7 @@ void thread_set_priority(int new_priority)
                                                     : MAX(curr->priority, new_priority);
     // 우선순위가 바뀌었으므로, 레디 리스트에 있는 놈들 중에 큰 녀석들이 있을 수 있다.
     // 앞에 녀석이 크면, 앞에 녀석으로 변경, 아니면 그냥
-    if (!list_empty(&ready_list) &&
-        list_entry(list_front(&ready_list), struct thread, elem)->priority > curr->priority)
-        thread_yield();
+    priority_yield();
 }
 
 /* Returns the current thread's priority. */
@@ -510,9 +516,7 @@ static struct thread *
 next_thread_to_run(void)
 {
     struct thread *run = running_thread();
-    if (list_empty(&ready_list) ||
-        (run->status != THREAD_BLOCKED &&
-         run->priority > list_entry(list_front(&ready_list), struct thread, elem)->priority))
+    if (list_empty(&ready_list))
         return idle_thread;
     else
         return list_entry(list_pop_front(&ready_list), struct thread, elem);
