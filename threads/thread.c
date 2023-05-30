@@ -187,20 +187,15 @@ void thread_tick(void)
     // 글로벌 틱 증가
     global_ticks++;
     // 모든 sleeping list 를 순회하면서 if (g tick >= w tick) 이면 무빙
-    struct list *sl = &sleep_list;
-    struct list_elem *p, *q;
-
-    for (p = list_begin(sl); p != list_end(sl);)
+    for (struct list_elem *e = list_begin(&sleep_list), *p; e != list_end(&sleep_list); e = p)
     {
-        q = list_next(p);
-        struct thread *nt = list_entry(p, struct thread, elem);
+        p = list_next(e);
+        struct thread *nt = list_entry(e, struct thread, elem);
         if (nt->status == THREAD_BLOCKED && global_ticks >= nt->wakeup_tick)
         {
-            // 해당 인자를 제거 후, 레디큐에 넣기
-            list_remove(p);
+            list_remove(e);
             thread_unblock(nt);
         }
-        p = q;
     }
     /* Enforce preemption. */
     if (++thread_ticks >= TIME_SLICE)
