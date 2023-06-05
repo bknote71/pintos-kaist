@@ -1,5 +1,6 @@
 {
-    "files.associations": {
-        "__threading_support": "c"
-    }
+  "files.associations": {
+    "__threading_support": "c",
+    "ios": "c"
+  }
 }

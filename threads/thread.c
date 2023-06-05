@@ -114,7 +114,7 @@ static bool sleep_sort(const struct list_elem *a, const struct list_elem *b,
 void priority_yield(void)
 {
     if (!list_empty(&ready_list) &&
-        list_entry(list_front(&ready_list), struct thread, elem) > thread_current()->priority)
+        list_entry(list_front(&ready_list), struct thread, elem)->priority > thread_current()->priority)
         thread_yield();
 }
 
@@ -505,6 +505,13 @@ init_thread(struct thread *t, const char *name, int priority)
     list_init(&t->donations);
     t->wait_on_lock = NULL;
     t->org_priority = priority;
+
+    /* for hierarchy */
+    list_init(&t->children);
+    sema_init(&t->exit_wait, 0);
+
+    // 정상 성공
+    t->exit = 0;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

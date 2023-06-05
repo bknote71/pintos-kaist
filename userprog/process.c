@@ -131,8 +131,12 @@ __do_fork(void *aux)
     struct thread *parent = (struct thread *)aux;
     struct thread *current = thread_current();
     /* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-    struct intr_frame *parent_if;
+    struct intr_frame *parent_if = &parent->tf;
     bool succ = true;
+
+    // hierarchy setting
+    list_push_back(&parent->children, &current->c_elem);
+    current->parent = parent;
 
     /* 1. Read the cpu context to local stack. */
     memcpy(&if_, parent_if, sizeof(struct intr_frame));
@@ -143,6 +147,7 @@ __do_fork(void *aux)
         goto error;
 
     process_activate(current);
+
 #ifdef VM
     supplemental_page_table_init(&current->spt);
     if (!supplemental_page_table_copy(&current->spt, &parent->spt))
@@ -213,7 +218,33 @@ int process_wait(tid_t child_tid UNUSED)
      * XXX:       to add infinite loop here before
      * XXX:       implementing the process_wait. */
 
+    // find child process
+    // struct thread *curr = thread_current();
+    // struct thread *child = NULL;
+    // struct list *children = &curr->children;
+
+    // for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
+    // {
+    //     struct thread *entry = list_entry(p, struct thread, c_elem);
+    //     if (entry->tid == child_tid)
+    //     {
+    //         child = entry;
+    //         list_remove(entry);
+    //         break;
+    //     }
+    // }
+
+    // if (child == NULL || child->exit == -1 || child->status == THREAD_DYING)
+    //     return -1;
+
+    // while (child->status != THREAD_DYING)
+    //     sema_down(&child->exit_wait);
+    // deallocate the descriptor of child process? tid 반환?
+    while (1)
+    {
+    }
     return -1;
+    // return child->exit;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -224,7 +255,9 @@ void process_exit(void)
      * TODO: Implement process termination message (see
      * TODO: project2/process_termination.html).
      * TODO: We recommend you to implement process resource cleanup here. */
-
+    // printf("Name of process: exit(%d)", thread_current()->exit);
+    // sema_up(&curr->exit_wait);
+    // printf("%s: exit(%d)\n", curr->name, curr->exit);
     process_cleanup();
 }
 
@@ -359,7 +392,6 @@ load(const char *file_name, struct intr_frame *if_)
     {
         argv[argc++] = f;
     }
-
     /* Open executable file. */
     file = filesys_open(file_name);
     if (file == NULL)
@@ -442,7 +474,7 @@ load(const char *file_name, struct intr_frame *if_)
     argument_stack(argv, argc, &if_->rsp);
     if_->rip = ehdr.e_entry;
     if_->R.rdi = argc;
-    if_->R.rsi = if_->rsp + sizeof(void (*)());
+    if_->R.rsi = (uint64_t)argv[0];
 
     success = true;
 
@@ -458,7 +490,7 @@ argument_stack(char *argv[], int argc, char **sp)
     for (int i = argc - 1; i >= 0; --i)
     {
         *sp = *sp - (strlen(argv[i]) + 1);
-        strncpy(*sp, argv[i], strlen(argv[i]) + 1);
+        strlcpy(*sp, argv[i], strlen(argv[i]) + 1);
         slen += strlen(argv[i]) + 1;
     }
 
