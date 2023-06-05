@@ -15,6 +15,8 @@
 #include "userprog/process.h"
 #endif
 
+#include "filesys/file.h"
+
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -512,9 +514,15 @@ init_thread(struct thread *t, const char *name, int priority)
 
     // 정상 성공
     t->exit = 0;
+
+    /* for File */
+    t->fdt = (struct file **)malloc(sizeof(struct file *) * 128);
+    t->next_fd = 1;
+    
+    
 }
 
-/* Chooses and returns the next thread to be scheduled.  Should
+/* Chooses and returns the next thread to be scheduled.  Shoulsd
    return a thread from the run queue, unless the run queue is
    empty.  (If the running thread can continue running, then it
    will be in the run queue.)  If the run queue is empty, return

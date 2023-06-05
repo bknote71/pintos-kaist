@@ -255,9 +255,8 @@ void process_exit(void)
      * TODO: Implement process termination message (see
      * TODO: project2/process_termination.html).
      * TODO: We recommend you to implement process resource cleanup here. */
-    // printf("Name of process: exit(%d)", thread_current()->exit);
-    // sema_up(&curr->exit_wait);
-    // printf("%s: exit(%d)\n", curr->name, curr->exit);
+    sema_up(&curr->exit_wait);
+    printf("%s: exit(%d)\n", curr->name, curr->exit);
     process_cleanup();
 }
 
@@ -288,6 +287,18 @@ process_cleanup(void)
         pml4_activate(NULL);
         pml4_destroy(pml4);
     }
+
+    /* File Resources 지우기 */
+    for (int i = 2; i < curr->next_fd; ++i)
+    {
+        file_close(*(curr->fdt + i));
+        free(*(curr->fdt + i));
+    }
+    free(curr->fdt);
+
+    /* allow write running file and close */
+    file_allow_write(curr->running_file);
+    file_close(curr->running_file);
 }
 
 /* Sets up the CPU for running user code in the nest thread.
@@ -400,6 +411,10 @@ load(const char *file_name, struct intr_frame *if_)
         goto done;
     }
 
+    /* file deny write*/
+    file_deny_write(file);
+    t->running_file = file;
+
     /* Read and verify executable header. */
     if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 0x3E // amd64
         || ehdr.e_version != 1 || ehdr.e_phentsize != sizeof(struct Phdr) || ehdr.e_phnum > 1024)
@@ -480,7 +495,7 @@ load(const char *file_name, struct intr_frame *if_)
 
 done:
     /* We arrive here whether the load is successful or not. */
-    file_close(file);
+    // file_close(file);
     return success;
 }
 static void

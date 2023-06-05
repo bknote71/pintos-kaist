@@ -10,6 +10,9 @@
 #include "vm/vm.h"
 #endif
 
+#include "filesys/file.h"
+#include "filesys/filesys.h"
+
 /* States in a thread's life cycle. */
 enum thread_status
 {
@@ -122,10 +125,17 @@ struct thread
     struct thread *parent;
     struct list children;
     struct list_elem c_elem;
+
+    /* Semaphore */
     struct semaphore exit_wait;
 
-    /* 기타 */
+    /* exit status */
     int exit;
+
+    /* About File */
+    struct file *running_file;
+    struct file **fdt;
+    int next_fd;
 };
 
 /* If false (default), use round-robin scheduler.

@@ -1,6 +1,7 @@
 {
   "files.associations": {
     "__threading_support": "c",
-    "ios": "c"
+    "ios": "c",
+    "stdio.h": "c"
   }
 }
