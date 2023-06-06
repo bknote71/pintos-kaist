@@ -13,6 +13,9 @@
 #include "threads/init.h"
 #include "userprog/process.h"
 
+#include "devices/input.h"
+#include "lib/kernel/console.h"
+
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
@@ -22,6 +25,7 @@ static int wait(tid_t tid);
 static struct file *get_file(int fd);
 static void set_next_fd();
 static void address_validate(void *ptr, void *lock);
+static void fd_validate(int fd, void *lock);
 
 /* System call.
  *
@@ -52,17 +56,15 @@ void syscall_init(void)
 }
 
 /* The main system call interface */
-void syscall_handler(struct intr_frame *f UNUSED)
+void syscall_handler(struct intr_frame *f)
 {
-    printf("system call!\n");
-
     struct thread *curr = thread_current();
     int sysnum = f->R.rax;
 
     char *fn;
     unsigned size, position;
 
-    int fd, fret;
+    int status, fd, fret;
     struct file *ff;
     void *buffer;
 
@@ -73,7 +75,9 @@ void syscall_handler(struct intr_frame *f UNUSED)
         break;
 
     case SYS_EXIT:
-        process_exit();
+        status = f->R.rdi;
+        exit(status);
+
         break;
 
     case SYS_EXEC:
@@ -91,7 +95,6 @@ void syscall_handler(struct intr_frame *f UNUSED)
         lock_acquire(&filesys_lock);
 
         fn = f->R.rdi;
-
         address_validate(fn, &filesys_lock);
 
         size = f->R.rsi;
@@ -120,15 +123,16 @@ void syscall_handler(struct intr_frame *f UNUSED)
         fn = f->R.rdi;
 
         address_validate(fn, &filesys_lock);
-
+        // printf("file name :%s start open\n", fn);
         ff = filesys_open(fn);
-
-        // 풀에 넣기
-        // fd 어떻게 할당할까?
-        set_next_fd();
-        *(curr->fdt + curr->next_fd) = ff;
-
-        f->R.rax = fd;
+        if (ff == NULL)
+            f->R.rax = -1;
+        else
+        {
+            set_next_fd();
+            *(curr->fdt + curr->next_fd) = ff;
+            f->R.rax = curr->next_fd;
+        }
 
         lock_release(&filesys_lock);
         break;
@@ -152,10 +156,13 @@ void syscall_handler(struct intr_frame *f UNUSED)
         buffer = (void *)f->R.rsi;
         size = (unsigned)f->R.rdx;
 
+        fd_validate(fd, &filesys_lock);
         address_validate(buffer, NULL);
 
-        if (f == 0)
+        if (fd == 0)
             fret = (int)input_getc();
+        else if (fd == 1) // could not read
+            fret = -1;
         else
             fret = (int)file_read(get_file(fd), buffer, size);
         f->R.rax = fret; // read bytes?
@@ -170,10 +177,16 @@ void syscall_handler(struct intr_frame *f UNUSED)
         buffer = (void *)f->R.rsi;
         size = (unsigned)f->R.rdx;
 
+        fd_validate(fd, &filesys_lock);
         address_validate(buffer, NULL);
 
-        if (f == 1)
+        if (fd == 0)
+            exit(-1);
+        else if (fd == 1)
+        {
             putbuf(buffer, size);
+            fret = size;
+        }
         else
             fret = (int)file_write(get_file(fd), buffer, size);
         f->R.rax = fret; // write bytes?
@@ -206,6 +219,8 @@ void syscall_handler(struct intr_frame *f UNUSED)
 
         fd = f->R.rdi;
         ff = get_file(fd);
+        if (ff == NULL)
+            exit(-1);
 
         // fd 삭제 방식
         *(curr->fdt + fd) = NULL;
@@ -219,9 +234,8 @@ void syscall_handler(struct intr_frame *f UNUSED)
         break;
     }
 
-    // do_iret ???????????????????/
+    // printf("do iret\n");
     do_iret(f);
-    // thread_exit();
 }
 
 static int exec(const char *cmd_line)
@@ -237,9 +251,10 @@ static int wait(tid_t tid)
 static struct file *
 get_file(int fd)
 {
+    if (fd >= 128)
+        return NULL;
     struct thread *curr = thread_current();
-    struct file *file;
-
+    struct file *file = file = *(curr->fdt + fd);
     return file;
 }
 
@@ -248,23 +263,34 @@ set_next_fd()
 {
     struct thread *curr = thread_current();
     int next_fd = curr->next_fd;
-    for (int i = 0; i < 128; ++i)
+    for (int i = 0; i < 127; ++i)
     {
         next_fd = (next_fd + 1) % 128;
-        if (next_fd >= 2 && *(curr->fdt + next_fd) == NULL)
+        if (next_fd > 2 && *(curr->fdt + next_fd) == NULL)
         {
             curr->next_fd = next_fd;
             return;
         }
     }
+    return -1;
 }
 
 static void address_validate(void *ptr, void *lock)
 {
-    if (ptr == NULL || !is_user_vaddr((uint64_t)ptr))
+    if (ptr == NULL || !is_user_vaddr((uint64_t)ptr) || pml4_get_page(thread_current()->pml4, ptr) == NULL)
     {
         if (lock != NULL)
             lock_release(((struct lock *)lock));
-        thread_exit();
+        exit(-1);
+    }
+}
+
+static void fd_validate(int fd, void *lock)
+{
+    if (fd < 0 || fd >= 128)
+    {
+        if (lock != NULL)
+            lock_release(((struct lock *)lock));
+        exit(-1);
     }
 }

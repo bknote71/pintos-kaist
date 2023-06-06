@@ -131,6 +131,7 @@ struct thread
 
     /* exit status */
     int exit;
+    int fin;
 
     /* About File */
     struct file *running_file;

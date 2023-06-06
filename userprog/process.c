@@ -16,8 +16,10 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
-#include <stdlib.h>
+// #include <stdlib.h>
+#include "threads/malloc.h"
 #include <string.h>
+
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -33,6 +35,9 @@ static void
 process_init(void)
 {
     struct thread *current = thread_current();
+    current->fdt = (struct file **)malloc(sizeof(struct file *) * 128);
+    for (int i = 0; i < 128; ++i)
+        *(current->fdt + i) = NULL;
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -212,39 +217,47 @@ int process_exec(void *f_name)
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
-int process_wait(tid_t child_tid UNUSED)
+int process_wait(tid_t child_tid)
 {
     /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
      * XXX:       to add infinite loop here before
      * XXX:       implementing the process_wait. */
 
     // find child process
-    // struct thread *curr = thread_current();
-    // struct thread *child = NULL;
-    // struct list *children = &curr->children;
+    struct thread *curr = thread_current();
+    struct thread *child = NULL;
+    struct list *children = &curr->children;
 
-    // for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
-    // {
-    //     struct thread *entry = list_entry(p, struct thread, c_elem);
-    //     if (entry->tid == child_tid)
-    //     {
-    //         child = entry;
-    //         list_remove(entry);
-    //         break;
-    //     }
-    // }
-
-    // if (child == NULL || child->exit == -1 || child->status == THREAD_DYING)
-    //     return -1;
-
-    // while (child->status != THREAD_DYING)
-    //     sema_down(&child->exit_wait);
-    // deallocate the descriptor of child process? tid 반환?
-    while (1)
+    for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
     {
+        struct thread *entry = list_entry(p, struct thread, c_elem);
+        if (entry->tid == child_tid)
+        {
+            child = entry;
+            list_remove(p);
+            break;
+        }
     }
-    return -1;
-    // return child->exit;
+
+    if (child == NULL || child->exit == -1 || child->fin || child->status == THREAD_DYING)
+        return -1;
+
+    while (!child->fin)
+        sema_down(&child->exit_wait);
+
+    // deallocate the descriptor of child process? tid 반환?
+    // how??
+
+    return child->exit;
+}
+
+/* Exit the process with exit status */
+void exit(int status)
+{
+    struct thread *curr = thread_current();
+    curr->exit = status;
+    printf("%s: exit(%d)\n", curr->name, curr->exit);
+    thread_exit();
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -255,9 +268,22 @@ void process_exit(void)
      * TODO: Implement process termination message (see
      * TODO: project2/process_termination.html).
      * TODO: We recommend you to implement process resource cleanup here. */
-    sema_up(&curr->exit_wait);
-    printf("%s: exit(%d)\n", curr->name, curr->exit);
     process_cleanup();
+    // 플래그 설정
+    curr->fin = 1;
+    sema_up(&curr->exit_wait);
+
+    /* file clean up */
+    for (int i = 2; i < curr->next_fd; ++i)
+    {
+        file_close(*(curr->fdt + i));
+        *(curr->fdt + i) = NULL; // null 처리 해줘야 한다.
+    }
+    free(curr->fdt);
+
+    /* allow write running file and close */
+    // file_allow_write(curr->running_file);
+    file_close(curr->running_file);
 }
 
 /* Free the current process's resources. */
@@ -289,16 +315,6 @@ process_cleanup(void)
     }
 
     /* File Resources 지우기 */
-    for (int i = 2; i < curr->next_fd; ++i)
-    {
-        file_close(*(curr->fdt + i));
-        free(*(curr->fdt + i));
-    }
-    free(curr->fdt);
-
-    /* allow write running file and close */
-    file_allow_write(curr->running_file);
-    file_close(curr->running_file);
 }
 
 /* Sets up the CPU for running user code in the nest thread.
@@ -395,7 +411,7 @@ load(const char *file_name, struct intr_frame *if_)
 
     /* Parsing File_Name */
 
-    char *argv[12];
+    char *argv[64];
     int argc = 0;
 
     char *saveptr, *f;
@@ -489,7 +505,7 @@ load(const char *file_name, struct intr_frame *if_)
     argument_stack(argv, argc, &if_->rsp);
     if_->rip = ehdr.e_entry;
     if_->R.rdi = argc;
-    if_->R.rsi = (uint64_t)argv[0];
+    if_->R.rsi = if_->rsp + sizeof(void (*)());
 
     success = true;
 
@@ -501,29 +517,38 @@ done:
 static void
 argument_stack(char *argv[], int argc, char **sp)
 {
-    int slen = 4;
+    // printf("sp: %p\n", *sp);
+    int slen = 0;
     for (int i = argc - 1; i >= 0; --i)
     {
         *sp = *sp - (strlen(argv[i]) + 1);
+        // printf("argv[%d][...]: %p\n", i, *sp);
         strlcpy(*sp, argv[i], strlen(argv[i]) + 1);
         slen += strlen(argv[i]) + 1;
+        argv[i] = *sp;
     }
 
     int rm = slen % 8 == 0 ? 8 : slen % 8;
     *sp -= 8 - rm;
     memset(*sp, 0, 8 - rm);
 
-    *sp -= sizeof(uint8_t);
+    // printf("있으면? : %p\n", *sp);
+
+    *sp -= sizeof(char *);
     **sp = 0;
+
+    // printf("하나더: %p\n", *sp);
 
     for (int i = argc - 1; i >= 0; --i)
     {
         uint64_t ref = (uint64_t)argv[i];
         *sp -= sizeof(char *);
+        // printf("argv[%d]: %p\n", i, *sp);
         memcpy(*sp, &ref, sizeof(char *));
     }
 
     *sp -= sizeof(void (*)());
+    // printf("마지막: %p\n", *sp);
     memset(*sp, 0, sizeof(void (*)()));
 }
 

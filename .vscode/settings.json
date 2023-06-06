@@ -2,6 +2,14 @@
   "files.associations": {
     "__threading_support": "c",
     "ios": "c",
-    "stdio.h": "c"
+    "stdio.h": "c",
+    "file.h": "c",
+    "input.h": "c",
+    "filesys.h": "c",
+    "console.h": "c",
+    "cstdlib": "c",
+    "locale": "c",
+    "__config": "c",
+    "*.inc": "c"
   }
 }
