@@ -193,7 +193,7 @@ error:
  * Returns -1 on fail. */
 int process_exec(void *f_name)
 {
-    char *file_name = f_name;
+    char *file_name = (char *)f_name;
     bool success;
 
     /* We cannot use the intr_frame in the thread structure.
@@ -519,7 +519,6 @@ load(const char *file_name, struct intr_frame *if_)
     if_->R.rsi = if_->rsp + sizeof(void (*)());
 
     success = true;
-
 done:
     /* We arrive here whether the load is successful or not. */
     // file_close(file);
@@ -539,9 +538,8 @@ argument_stack(char *argv[], int argc, char **sp)
         argv[i] = *sp;
     }
 
-    int rm = slen % 8 == 0 ? 8 : slen % 8;
-    *sp -= 8 - rm;
-    memset(*sp, 0, 8 - rm);
+    *sp -= 8 - (slen & 7);
+    memset(*sp, 0, 8 - (slen & 7));
 
     // printf("있으면? : %p\n", *sp);
 

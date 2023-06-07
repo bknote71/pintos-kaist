@@ -94,7 +94,11 @@ void syscall_handler(struct intr_frame *f)
 
     case SYS_EXEC:
         lock_acquire(&filesys_lock);
-        f->R.rax = exec(f->R.rdi);
+
+        fn = f->R.rdi;
+        address_validate(fn, &filesys_lock);
+
+        f->R.rax = exec(fn);
         lock_release(&filesys_lock);
 
         break;

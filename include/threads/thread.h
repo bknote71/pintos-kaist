@@ -130,7 +130,6 @@ struct thread
     /* Semaphore */
     struct semaphore exit_wait;
     struct semaphore create_wait;
-    struct semaphore start_wait; // wait parent yield 이후.
 
     /* exit status */
     int exit;
