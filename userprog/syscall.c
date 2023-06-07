@@ -96,8 +96,6 @@ void syscall_handler(struct intr_frame *f)
         break;
 
     case SYS_EXEC:
-        // lock_acquire(&filesys_lock);
-
         fn = f->R.rdi;
         address_validate(fn, NULL);
 
@@ -106,8 +104,6 @@ void syscall_handler(struct intr_frame *f)
         strlcpy(exec_cmd, fn, strlen(fn) + 1);
         exec(exec_cmd);
         exit(-1);
-
-        // lock_release(&filesys_lock);
         break;
     case SYS_WAIT:
         f->R.rax = wait(f->R.rdi);
@@ -288,7 +284,7 @@ set_next_fd()
 {
     struct thread *curr = thread_current();
     int next_fd = curr->next_fd;
-    for (int i = 0; i < 127; ++i)
+    for (int i = 0; i < 128; ++i)
     {
         next_fd = (next_fd + 1) % 128;
         if (next_fd > 2 && *(curr->fdt + next_fd) == NULL)

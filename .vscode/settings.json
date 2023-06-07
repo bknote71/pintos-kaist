@@ -15,6 +15,7 @@
     "vaddr.h": "c",
     "__mutex_base": "c",
     "atomic": "c",
-    "syscall.h": "c"
+    "syscall.h": "c",
+    "off_t.h": "c"
   }
 }

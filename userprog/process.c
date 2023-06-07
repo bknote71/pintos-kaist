@@ -12,13 +12,13 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
 #include <string.h>
-
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -208,8 +208,9 @@ int process_exec(void *f_name)
     process_cleanup();
 
     /* And then load the binary */
-
+    lock_acquire(&filesys_lock);
     success = load(file_name, &_if);
+    lock_release(&filesys_lock);
 
     /* If load failed, quit. */
     palloc_free_page(file_name);
@@ -240,6 +241,7 @@ int process_wait(tid_t child_tid)
     struct thread *child = NULL;
     struct list *children = &curr->children;
 
+    enum intr_level intr = intr_disable();
     for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
     {
         struct thread *entry = list_entry(p, struct thread, c_elem);
@@ -250,14 +252,13 @@ int process_wait(tid_t child_tid)
             break;
         }
     }
+    intr_set_level(intr);
 
     if (child == NULL || child->exit == -1)
         return -1;
 
     sema_down(&child->exit_wait);
-
-    // deallocate the descriptor of child process? tid 반환?
-    // how??
+    thread_unblock(child);
 
     return child->exit;
 }
@@ -268,18 +269,6 @@ void exit(int status)
     struct thread *curr = thread_current();
     curr->exit = status;
     printf("%s: exit(%d)\n", curr->name, curr->exit);
-    thread_exit();
-}
-
-/* Exit the process. This function is called by thread_exit (). */
-void process_exit(void)
-{
-    struct thread *curr = thread_current();
-    /* TODO: Your code goes here.
-     * TODO: Implement process termination message (see
-     * TODO: project2/process_termination.html).
-     * TODO: We recommend you to implement process resource cleanup here. */
-    process_cleanup();
 
     /* file clean up */
     for (int i = 2; i < curr->next_fd; ++i)
@@ -297,6 +286,23 @@ void process_exit(void)
     // 플래그 설정
     curr->fin = 1;
     sema_up(&curr->exit_wait);
+
+    enum intr_level intr = intr_disable();
+    thread_block();
+    intr_set_level(intr);
+
+    thread_exit(); // << 이렇게 하면 안됨
+}
+
+/* Exit the process. This function is called by thread_exit (). */
+void process_exit(void)
+{
+    struct thread *curr = thread_current();
+    /* TODO: Your code goes here.
+     * TODO: Implement process termination message (see
+     * TODO: project2/process_termination.html).
+     * TODO: We recommend you to implement process resource cleanup here. */
+    process_cleanup();
 }
 
 /* Free the current process's resources. */
@@ -326,8 +332,6 @@ process_cleanup(void)
         pml4_activate(NULL);
         pml4_destroy(pml4);
     }
-
-    /* File Resources 지우기 */
 }
 
 /* Sets up the CPU for running user code in the nest thread.

@@ -714,8 +714,3 @@ allocate_tid(void)
 
     return tid;
 }
-
-int running_thread_status()
-{
-    return running_thread()->status;
-}
