@@ -26,6 +26,7 @@ static struct file *get_file(int fd);
 static void set_next_fd();
 static void address_validate(void *ptr, void *lock);
 static void fd_validate(int fd, void *lock);
+static struct thread *find_child(int pid);
 
 /* System call.
  *
@@ -59,12 +60,13 @@ void syscall_init(void)
 void syscall_handler(struct intr_frame *f)
 {
     struct thread *curr = thread_current();
+    struct thread *child;
+    enum intr_level intr;
     int sysnum = f->R.rax;
 
-    char *fn;
+    char *tn, *fn;
     unsigned size, position;
-
-    int status, fd, fret;
+    int pid, status, fd, fret;
     struct file *ff;
     void *buffer;
 
@@ -78,6 +80,16 @@ void syscall_handler(struct intr_frame *f)
         status = f->R.rdi;
         exit(status);
 
+        break;
+    case SYS_FORK:
+        tn = f->R.rdi;
+        address_validate(tn, NULL);
+
+        // 자식 id 반환
+        pid = process_fork(tn, f);
+        child = find_child(pid);
+        sema_down(&child->create_wait);
+        f->R.rax = pid;
         break;
 
     case SYS_EXEC:
@@ -233,8 +245,6 @@ void syscall_handler(struct intr_frame *f)
     default:
         break;
     }
-
-    // printf("do iret\n");
     do_iret(f);
 }
 
@@ -293,4 +303,17 @@ static void fd_validate(int fd, void *lock)
             lock_release(((struct lock *)lock));
         exit(-1);
     }
+}
+
+static struct thread *find_child(int pid)
+{
+    struct thread *curr = thread_current();
+    struct list *children = &(curr->children);
+    for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
+    {
+        struct thread *entry = list_entry(p, struct thread, c_elem);
+        if (entry->tid == pid)
+            return entry;
+    }
+    return NULL;
 }

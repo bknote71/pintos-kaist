@@ -512,9 +512,11 @@ init_thread(struct thread *t, const char *name, int priority)
     t->wait_on_lock = NULL;
     t->org_priority = priority;
 
-    /* for hierarchy */
+    /* for children */
     list_init(&t->children);
     sema_init(&t->exit_wait, 0);
+    sema_init(&t->create_wait, 0);
+    sema_init(&t->start_wait, 0);
 
     // 정상 성공
     t->exit = 0;
@@ -712,4 +714,9 @@ allocate_tid(void)
     lock_release(&tid_lock);
 
     return tid;
+}
+
+int running_thread_status()
+{
+    return running_thread()->status;
 }

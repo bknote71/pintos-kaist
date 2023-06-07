@@ -6,6 +6,7 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/mmu.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
@@ -16,8 +17,6 @@
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
-// #include <stdlib.h>
-#include "threads/malloc.h"
 #include <string.h>
 
 #ifdef VM
@@ -84,19 +83,22 @@ initd(void *f_name)
 
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
-tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
+tid_t process_fork(const char *name, struct intr_frame *if_)
 {
     /* Clone current thread to new thread.*/
-    return thread_create(name,
-                         PRI_DEFAULT, __do_fork, thread_current());
+    struct thread *curr = thread_current();
+    memcpy(&curr->ttf, if_, sizeof(struct intr_frame));
+    tid_t tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
+    return tid;
 }
 
 #ifndef VM
 /* Duplicate the parent's address space by passing this function to the
  * pml4_for_each. This is only for the project 2. */
 static bool
-duplicate_pte(uint64_t *pte, void *va, void *aux)
+duplicate_pte(uint64_t *pte, void *va, void *aux) // 부모 pte, vaddr, 부모 스레드?
 {
+
     struct thread *current = thread_current();
     struct thread *parent = (struct thread *)aux;
     void *parent_page;
@@ -104,22 +106,28 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
     bool writable;
 
     /* 1. TODO: If the parent_page is kernel page, then return immediately. */
+    if (is_kern_pte(pte))
+        return true;
 
     /* 2. Resolve VA from the parent's page map level 4. */
     parent_page = pml4_get_page(parent->pml4, va);
 
     /* 3. TODO: Allocate new PAL_USER page for the child and set result to
      *    TODO: NEWPAGE. */
+    newpage = palloc_get_page(PAL_USER | PAL_ZERO);
 
     /* 4. TODO: Duplicate parent's page to the new page and
      *    TODO: check whether parent's page is writable or not (set WRITABLE
      *    TODO: according to the result). */
-
+    memcpy(newpage, parent_page, PGSIZE);
+    writable = is_writable(pte);
     /* 5. Add new page to child's page table at address VA with WRITABLE
      *    permission. */
     if (!pml4_set_page(current->pml4, va, newpage, writable))
     {
         /* 6. TODO: if fail to insert page, do error handling. */
+        palloc_free_page(newpage);
+        return false;
     }
     return true;
 }
@@ -135,16 +143,12 @@ __do_fork(void *aux)
     struct intr_frame if_;
     struct thread *parent = (struct thread *)aux;
     struct thread *current = thread_current();
-    /* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-    struct intr_frame *parent_if = &parent->tf;
+    struct intr_frame *parent_if = &parent->ttf;
     bool succ = true;
-
-    // hierarchy setting
-    list_push_back(&parent->children, &current->c_elem);
-    current->parent = parent;
 
     /* 1. Read the cpu context to local stack. */
     memcpy(&if_, parent_if, sizeof(struct intr_frame));
+    if_.R.rax = 0;
 
     /* 2. Duplicate PT */
     current->pml4 = pml4_create();
@@ -160,6 +164,7 @@ __do_fork(void *aux)
 #else
     if (!pml4_for_each(parent->pml4, duplicate_pte, parent))
         goto error;
+
 #endif
 
     /* TODO: Your code goes here.
@@ -167,12 +172,19 @@ __do_fork(void *aux)
      * TODO:       in include/filesys/file.h. Note that parent should not return
      * TODO:       from the fork() until this function successfully duplicates
      * TODO:       the resources of parent.*/
+    process_init(); // 여기서 fdt 초기화 완료됨
+    for (int i = 2; i < 128; ++i)
+    {
+        struct file *fp = *(parent->fdt + i);
+        if (fp != NULL)
+            *(current->fdt + i) = file_duplicate(fp);
+    }
 
-    process_init();
+    // thread_unblock(parent);
+    sema_up(&current->create_wait);
 
     /* Finally, switch to the newly created process. */
-    if (succ)
-        do_iret(&if_);
+    do_iret(&if_);
 error:
     thread_exit();
 }
@@ -222,7 +234,6 @@ int process_wait(tid_t child_tid)
     /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
      * XXX:       to add infinite loop here before
      * XXX:       implementing the process_wait. */
-
     // find child process
     struct thread *curr = thread_current();
     struct thread *child = NULL;
@@ -239,11 +250,10 @@ int process_wait(tid_t child_tid)
         }
     }
 
-    if (child == NULL || child->exit == -1 || child->fin || child->status == THREAD_DYING)
+    if (child == NULL || child->exit == -1)
         return -1;
 
-    while (!child->fin)
-        sema_down(&child->exit_wait);
+    sema_down(&child->exit_wait);
 
     // deallocate the descriptor of child process? tid 반환?
     // how??
@@ -269,9 +279,6 @@ void process_exit(void)
      * TODO: project2/process_termination.html).
      * TODO: We recommend you to implement process resource cleanup here. */
     process_cleanup();
-    // 플래그 설정
-    curr->fin = 1;
-    sema_up(&curr->exit_wait);
 
     /* file clean up */
     for (int i = 2; i < curr->next_fd; ++i)
@@ -284,6 +291,10 @@ void process_exit(void)
     /* allow write running file and close */
     // file_allow_write(curr->running_file);
     file_close(curr->running_file);
+
+    // 플래그 설정
+    curr->fin = 1;
+    sema_up(&curr->exit_wait);
 }
 
 /* Free the current process's resources. */

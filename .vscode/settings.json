@@ -10,6 +10,11 @@
     "cstdlib": "c",
     "locale": "c",
     "__config": "c",
-    "*.inc": "c"
+    "*.inc": "c",
+    "__locale": "c",
+    "vaddr.h": "c",
+    "__mutex_base": "c",
+    "atomic": "c",
+    "syscall.h": "c"
   }
 }
