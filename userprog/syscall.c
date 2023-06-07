@@ -16,6 +16,9 @@
 #include "devices/input.h"
 #include "lib/kernel/console.h"
 
+#include "string.h"
+#include "threads/palloc.h"
+
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
@@ -93,14 +96,18 @@ void syscall_handler(struct intr_frame *f)
         break;
 
     case SYS_EXEC:
-        lock_acquire(&filesys_lock);
+        // lock_acquire(&filesys_lock);
 
         fn = f->R.rdi;
-        address_validate(fn, &filesys_lock);
+        address_validate(fn, NULL);
 
-        f->R.rax = exec(fn);
-        lock_release(&filesys_lock);
+        // page 를 만들어야 하나?
+        char *exec_cmd = palloc_get_page(0);
+        strlcpy(exec_cmd, fn, strlen(fn) + 1);
+        exec(exec_cmd);
+        exit(-1);
 
+        // lock_release(&filesys_lock);
         break;
     case SYS_WAIT:
         f->R.rax = wait(f->R.rdi);
@@ -181,8 +188,8 @@ void syscall_handler(struct intr_frame *f)
             fret = -1;
         else
             fret = (int)file_read(get_file(fd), buffer, size);
-        f->R.rax = fret; // read bytes?
 
+        f->R.rax = fret; // read bytes?
         lock_release(&filesys_lock);
         break;
 
@@ -214,7 +221,10 @@ void syscall_handler(struct intr_frame *f)
         lock_acquire(&filesys_lock);
 
         fd = f->R.rdi;
-        position = (unsigned)f->R.rdi;
+        position = (unsigned)f->R.rsi;
+
+        fd_validate(fd, &filesys_lock);
+
         file_seek(get_file(fd), position);
 
         lock_release(&filesys_lock);
@@ -249,6 +259,7 @@ void syscall_handler(struct intr_frame *f)
     default:
         break;
     }
+
     do_iret(f);
 }
 

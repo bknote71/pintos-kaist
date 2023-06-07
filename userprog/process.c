@@ -208,6 +208,7 @@ int process_exec(void *f_name)
     process_cleanup();
 
     /* And then load the binary */
+
     success = load(file_name, &_if);
 
     /* If load failed, quit. */
@@ -291,6 +292,7 @@ void process_exit(void)
     /* allow write running file and close */
     // file_allow_write(curr->running_file);
     file_close(curr->running_file);
+    curr->running_file = NULL;
 
     // 플래그 설정
     curr->fin = 1;
@@ -430,6 +432,7 @@ load(const char *file_name, struct intr_frame *if_)
     {
         argv[argc++] = f;
     }
+
     /* Open executable file. */
     file = filesys_open(file_name);
     if (file == NULL)
