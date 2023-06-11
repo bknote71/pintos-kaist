@@ -28,15 +28,13 @@ static bool load(const char *file_name, struct intr_frame *if_);
 static void initd(void *f_name);
 static void __do_fork(void *);
 static void argument_stack(char *argv[], int argc, char **sp);
+static void semaup_child_clear_wait(void);
 
 /* General process initializer for initd and other process. */
 static void
 process_init(void)
 {
     struct thread *current = thread_current();
-    // current->fdt = (struct file **)malloc(sizeof(struct file *) * 128);
-    // for (int i = 0; i < 128; ++i)
-    //     *(current->fdt + i) = NULL;
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -179,7 +177,7 @@ __do_fork(void *aux)
      * TODO:       the resources of parent.*/
     process_init();
 
-    for (int i = 2; i < 128; ++i)
+    for (int i = 2; i < FDT_MAX_COUNT; ++i)
     {
         struct file *fp = *(parent->fdt + i);
         *(current->fdt + i) = fp != NULL ? file_duplicate(fp) : NULL;
@@ -246,21 +244,12 @@ int process_wait(tid_t child_tid)
     struct thread *child = NULL;
     struct list *children = &curr->children;
 
-    for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
-    {
-        struct thread *entry = list_entry(p, struct thread, c_elem);
-        if (entry->tid == child_tid)
-        {
-            child = entry;
-            break;
-        }
-    }
-
+    child = find_child_by_id(child_tid);
     if (child == NULL)
         return -1;
+    list_remove(&child->c_elem);
 
     sema_down(&child->exit_wait);
-    list_remove(&child->c_elem);
     sema_up(&child->clear_wait);
 
     return child->exit;
@@ -285,26 +274,19 @@ void process_exit(void)
      * TODO: We recommend you to implement process resource cleanup here. */
 
     /* file clean up */
-    for (int i = 2; i < 128; ++i)
+    for (int i = 2; i < FDT_MAX_COUNT; ++i)
     {
         file_close(*(curr->fdt + i));
         *(curr->fdt + i) = NULL; // null 처리 해줘야 한다.
     }
-
-    palloc_free_multiple(curr->fdt, 2);
+    // palloc_free_multiple(curr->fdt, FDT_PAGES);
+    free(curr->fdt);
     file_close(curr->running_file);
     curr->running_file = NULL;
 
     process_cleanup();
     sema_up(&curr->exit_wait);
-
-    struct list *children = &curr->children;
-    for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
-    {
-        struct thread *child = list_entry(p, struct thread, c_elem);
-        sema_up(&child->clear_wait);
-    }
-
+    semaup_child_clear_wait();
     sema_down(&curr->clear_wait);
 }
 
@@ -536,12 +518,10 @@ done:
 static void
 argument_stack(char *argv[], int argc, char **sp)
 {
-    // printf("sp: %p\n", *sp);
     int slen = 0;
     for (int i = argc - 1; i >= 0; --i)
     {
         *sp = *sp - (strlen(argv[i]) + 1);
-        // printf("argv[%d][...]: %p\n", i, *sp);
         strlcpy(*sp, argv[i], strlen(argv[i]) + 1);
         slen += strlen(argv[i]) + 1;
         argv[i] = *sp;
@@ -550,23 +530,17 @@ argument_stack(char *argv[], int argc, char **sp)
     *sp -= 8 - (slen & 7);
     memset(*sp, 0, 8 - (slen & 7));
 
-    // printf("있으면? : %p\n", *sp);
-
     *sp -= sizeof(char *);
     **sp = 0;
-
-    // printf("하나더: %p\n", *sp);
 
     for (int i = argc - 1; i >= 0; --i)
     {
         uint64_t ref = (uint64_t)argv[i];
         *sp -= sizeof(char *);
-        // printf("argv[%d]: %p\n", i, *sp);
         memcpy(*sp, &ref, sizeof(char *));
     }
 
     *sp -= sizeof(void (*)());
-    // printf("마지막: %p\n", *sp);
     memset(*sp, 0, sizeof(void (*)()));
 }
 
@@ -792,3 +766,27 @@ setup_stack(struct intr_frame *if_)
     return success;
 }
 #endif /* VM */
+
+struct thread *find_child_by_id(int tid)
+{
+    struct thread *curr = thread_current();
+    struct list *children = &(curr->children);
+    for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
+    {
+        struct thread *entry = list_entry(p, struct thread, c_elem);
+        if (entry->tid == tid)
+            return entry;
+    }
+    return NULL;
+}
+
+static void semaup_child_clear_wait()
+{
+    struct thread *curr = thread_current();
+    struct list *children = &curr->children;
+    for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
+    {
+        struct thread *child = list_entry(p, struct thread, c_elem);
+        sema_up(&child->clear_wait);
+    }
+}

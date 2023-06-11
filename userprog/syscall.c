@@ -26,10 +26,9 @@ void syscall_handler(struct intr_frame *);
 static int exec(const char *cmd_line);
 static int wait(tid_t tid);
 static struct file *get_file(int fd);
-static int set_next_fd();
+static int set_file_to_nextfd(struct file *file);
 static void address_validate(void *ptr);
 static void fd_validate(int fd);
-static struct thread *find_child(int pid);
 
 /* System call.
  *
@@ -92,7 +91,7 @@ void syscall_handler(struct intr_frame *f)
         pid = process_fork(tn, f);
         if (pid != TID_ERROR)
         {
-            child = find_child(pid);
+            child = find_child_by_id(pid);
             sema_down(&child->create_wait);
             pid = child->exit == TID_ERROR ? TID_ERROR : pid;
         }
@@ -153,11 +152,9 @@ void syscall_handler(struct intr_frame *f)
             f->R.rax = -1;
         else
         {
-            nd = set_next_fd();
+            nd = set_file_to_nextfd(ff);
             if (nd == -1)
                 file_close(ff);
-            else
-                *(curr->fdt + nd) = ff;
             f->R.rax = nd;
         }
 
@@ -228,22 +225,20 @@ void syscall_handler(struct intr_frame *f)
         position = f->R.rsi;
 
         fd_validate(fd);
-
         file_seek(get_file(fd), position);
         break;
 
     case SYS_TELL:
         fd = f->R.rdi;
+
         position = file_tell(get_file(fd));
         f->R.rax = position;
         break;
 
     case SYS_CLOSE:
         fd = f->R.rdi;
+
         ff = get_file(fd);
-        if (ff == NULL)
-            exit(-1);
-        // fd 삭제 방식
         *(curr->fdt + fd) = NULL;
         file_close(ff);
         break;
@@ -268,25 +263,27 @@ static int wait(tid_t tid)
 static struct file *
 get_file(int fd)
 {
-    if (fd >= 128)
-        return NULL;
-    struct thread *curr = thread_current();
-    struct file *file = file = *(curr->fdt + fd);
+    if (fd < 2 || fd >= FDT_MAX_COUNT)
+        exit(-1);
+    struct file *file = *(thread_current()->fdt + fd);
+    if (file == NULL)
+        exit(-1);
     return file;
 }
 
 static int
-set_next_fd()
+set_file_to_nextfd(struct file *file)
 {
     struct thread *curr = thread_current();
     int next_fd = curr->next_fd;
-    for (int i = 0; i < 128; ++i)
+    for (int i = 0; i < FDT_MAX_COUNT; ++i)
     {
-        next_fd = (next_fd + 1) % 128;
+        next_fd = (next_fd + 1) % FDT_MAX_COUNT;
         if (next_fd > 2 && *(curr->fdt + next_fd) == NULL)
         {
+            *(curr->fdt + next_fd) = file;
             curr->next_fd = next_fd;
-            return curr->next_fd;
+            return next_fd;
         }
     }
     return -1;
@@ -306,17 +303,4 @@ static void fd_validate(int fd)
     {
         exit(-1);
     }
-}
-
-static struct thread *find_child(int pid)
-{
-    struct thread *curr = thread_current();
-    struct list *children = &(curr->children);
-    for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
-    {
-        struct thread *entry = list_entry(p, struct thread, c_elem);
-        if (entry->tid == pid)
-            return entry;
-    }
-    return NULL;
 }

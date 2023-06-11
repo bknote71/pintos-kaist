@@ -10,5 +10,6 @@ int process_wait(tid_t);
 void process_exit(void);
 void process_activate(struct thread *next);
 void exit(int);
+struct thread *find_child_by_id(int);
 
 #endif /* userprog/process.h */

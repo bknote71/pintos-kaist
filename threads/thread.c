@@ -16,6 +16,7 @@
 #endif
 
 #include "filesys/file.h"
+#include "threads/malloc.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -257,7 +258,8 @@ tid_t thread_create(const char *name, int priority,
     list_push_back(&curr->children, &t->c_elem);
 
     /* File setting */
-    t->fdt = palloc_get_multiple(PAL_ZERO, 2);
+    // t->fdt = palloc_get_multiple(PAL_ZERO, FDT_PAGES);
+    t->fdt = (struct file **)calloc(FDT_MAX_COUNT, sizeof(struct file *));
     if (t->fdt == NULL)
         return TID_ERROR;
 
