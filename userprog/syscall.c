@@ -26,7 +26,7 @@ void syscall_handler(struct intr_frame *);
 static int exec(const char *cmd_line);
 static int wait(tid_t tid);
 static struct file *get_file(int fd);
-static void set_next_fd();
+static int set_next_fd();
 static void address_validate(void *ptr, void *lock);
 static void fd_validate(int fd, void *lock);
 static struct thread *find_child(int pid);
@@ -69,7 +69,7 @@ void syscall_handler(struct intr_frame *f)
 
     char *tn, *fn;
     unsigned size, position;
-    int pid, status, fd, fret;
+    int pid, status, fd, fret, ret, nd;
     struct file *ff;
     void *buffer;
 
@@ -90,8 +90,13 @@ void syscall_handler(struct intr_frame *f)
 
         // 자식 id 반환
         pid = process_fork(tn, f);
-        child = find_child(pid);
-        sema_down(&child->create_wait);
+        if (pid != TID_ERROR)
+        {
+            child = find_child(pid);
+            sema_down(&child->create_wait);
+            pid = child->exit == TID_ERROR ? TID_ERROR : pid;
+        }
+
         f->R.rax = pid;
         break;
 
@@ -101,9 +106,13 @@ void syscall_handler(struct intr_frame *f)
 
         // page 를 만들어야 하나?
         char *exec_cmd = palloc_get_page(0);
-        strlcpy(exec_cmd, fn, strlen(fn) + 1);
-        exec(exec_cmd);
-        exit(-1);
+        if (exec_cmd == NULL)
+            exit(-1);
+        strlcpy(exec_cmd, fn, PGSIZE);
+        if ((ret = exec(exec_cmd)) < 0)
+            exit(-1);
+
+        f->R.rax = ret;
         break;
     case SYS_WAIT:
         f->R.rax = wait(f->R.rdi);
@@ -140,17 +149,19 @@ void syscall_handler(struct intr_frame *f)
         lock_acquire(&filesys_lock);
 
         fn = f->R.rdi;
-
         address_validate(fn, &filesys_lock);
-        // printf("file name :%s start open\n", fn);
+
         ff = filesys_open(fn);
         if (ff == NULL)
             f->R.rax = -1;
         else
         {
-            set_next_fd();
-            *(curr->fdt + curr->next_fd) = ff;
-            f->R.rax = curr->next_fd;
+            nd = set_next_fd();
+            if (nd == -1)
+                file_close(ff);
+            else
+                *(curr->fdt + nd) = ff;
+            f->R.rax = nd;
         }
 
         lock_release(&filesys_lock);
@@ -162,7 +173,7 @@ void syscall_handler(struct intr_frame *f)
         fd = f->R.rdi;
         // fd 를 사용해서 파일 탐색
         ff = get_file(fd);
-        fret = (int)file_length(ff);
+        fret = ff == NULL ? -1 : (int)file_length(ff);
         f->R.rax = fret;
 
         lock_release(&filesys_lock);
@@ -190,13 +201,12 @@ void syscall_handler(struct intr_frame *f)
         break;
 
     case SYS_WRITE:
-        lock_acquire(&filesys_lock);
 
         fd = f->R.rdi;
         buffer = (void *)f->R.rsi;
         size = (unsigned)f->R.rdx;
 
-        fd_validate(fd, &filesys_lock);
+        fd_validate(fd, NULL);
         address_validate(buffer, NULL);
 
         if (fd == 0)
@@ -207,38 +217,31 @@ void syscall_handler(struct intr_frame *f)
             fret = size;
         }
         else
+        {
+            lock_acquire(&filesys_lock);
             fret = (int)file_write(get_file(fd), buffer, size);
+            lock_release(&filesys_lock);
+        }
         f->R.rax = fret; // write bytes?
 
-        lock_release(&filesys_lock);
         break;
 
     case SYS_SEEK:
-        lock_acquire(&filesys_lock);
-
         fd = f->R.rdi;
         position = (unsigned)f->R.rsi;
 
-        fd_validate(fd, &filesys_lock);
+        fd_validate(fd, NULL);
 
         file_seek(get_file(fd), position);
-
-        lock_release(&filesys_lock);
         break;
 
     case SYS_TELL:
-        lock_acquire(&filesys_lock);
-
         fd = f->R.rdi;
         position = file_tell(get_file(fd));
         f->R.rax = position;
-
-        lock_release(&filesys_lock);
         break;
 
     case SYS_CLOSE:
-        lock_acquire(&filesys_lock);
-
         fd = f->R.rdi;
         ff = get_file(fd);
         if (ff == NULL)
@@ -247,9 +250,6 @@ void syscall_handler(struct intr_frame *f)
         // fd 삭제 방식
         *(curr->fdt + fd) = NULL;
         file_close(ff);
-
-        // how to free ff?
-        lock_release(&filesys_lock);
         break;
 
     default:
@@ -279,7 +279,7 @@ get_file(int fd)
     return file;
 }
 
-static void
+static int
 set_next_fd()
 {
     struct thread *curr = thread_current();
@@ -290,7 +290,7 @@ set_next_fd()
         if (next_fd > 2 && *(curr->fdt + next_fd) == NULL)
         {
             curr->next_fd = next_fd;
-            return;
+            return curr->next_fd;
         }
     }
     return -1;

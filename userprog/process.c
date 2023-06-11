@@ -34,9 +34,9 @@ static void
 process_init(void)
 {
     struct thread *current = thread_current();
-    current->fdt = (struct file **)malloc(sizeof(struct file *) * 128);
-    for (int i = 0; i < 128; ++i)
-        *(current->fdt + i) = NULL;
+    // current->fdt = (struct file **)malloc(sizeof(struct file *) * 128);
+    // for (int i = 0; i < 128; ++i)
+    //     *(current->fdt + i) = NULL;
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -98,7 +98,6 @@ tid_t process_fork(const char *name, struct intr_frame *if_)
 static bool
 duplicate_pte(uint64_t *pte, void *va, void *aux) // 부모 pte, vaddr, 부모 스레드?
 {
-
     struct thread *current = thread_current();
     struct thread *parent = (struct thread *)aux;
     void *parent_page;
@@ -112,9 +111,15 @@ duplicate_pte(uint64_t *pte, void *va, void *aux) // 부모 pte, vaddr, 부모 �
     /* 2. Resolve VA from the parent's page map level 4. */
     parent_page = pml4_get_page(parent->pml4, va);
 
+    if (parent_page == NULL)
+        return false;
+
     /* 3. TODO: Allocate new PAL_USER page for the child and set result to
      *    TODO: NEWPAGE. */
     newpage = palloc_get_page(PAL_USER | PAL_ZERO);
+
+    if (newpage == NULL)
+        return false;
 
     /* 4. TODO: Duplicate parent's page to the new page and
      *    TODO: check whether parent's page is writable or not (set WRITABLE
@@ -172,21 +177,22 @@ __do_fork(void *aux)
      * TODO:       in include/filesys/file.h. Note that parent should not return
      * TODO:       from the fork() until this function successfully duplicates
      * TODO:       the resources of parent.*/
-    process_init(); // 여기서 fdt 초기화 완료됨
+    process_init();
+
     for (int i = 2; i < 128; ++i)
     {
         struct file *fp = *(parent->fdt + i);
-        if (fp != NULL)
-            *(current->fdt + i) = file_duplicate(fp);
+        *(current->fdt + i) = fp != NULL ? file_duplicate(fp) : NULL;
     }
+    current->next_fd = parent->next_fd;
 
-    // thread_unblock(parent);
     sema_up(&current->create_wait);
 
     /* Finally, switch to the newly created process. */
     do_iret(&if_);
 error:
-    thread_exit();
+    sema_up(&current->create_wait);
+    exit(TID_ERROR);
 }
 
 /* Switch the current execution context to the f_name.
@@ -241,24 +247,22 @@ int process_wait(tid_t child_tid)
     struct thread *child = NULL;
     struct list *children = &curr->children;
 
-    enum intr_level intr = intr_disable();
     for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
     {
         struct thread *entry = list_entry(p, struct thread, c_elem);
         if (entry->tid == child_tid)
         {
             child = entry;
-            list_remove(p);
             break;
         }
     }
-    intr_set_level(intr);
 
-    if (child == NULL || child->exit == -1)
+    if (child == NULL)
         return -1;
 
     sema_down(&child->exit_wait);
-    thread_unblock(child);
+    list_remove(&child->c_elem);
+    sema_up(&child->clear_wait);
 
     return child->exit;
 }
@@ -269,29 +273,7 @@ void exit(int status)
     struct thread *curr = thread_current();
     curr->exit = status;
     printf("%s: exit(%d)\n", curr->name, curr->exit);
-
-    /* file clean up */
-    for (int i = 2; i < curr->next_fd; ++i)
-    {
-        file_close(*(curr->fdt + i));
-        *(curr->fdt + i) = NULL; // null 처리 해줘야 한다.
-    }
-    free(curr->fdt);
-
-    /* allow write running file and close */
-    // file_allow_write(curr->running_file);
-    file_close(curr->running_file);
-    curr->running_file = NULL;
-
-    // 플래그 설정
-    curr->fin = 1;
-    sema_up(&curr->exit_wait);
-
-    enum intr_level intr = intr_disable();
-    thread_block();
-    intr_set_level(intr);
-
-    thread_exit(); // << 이렇게 하면 안됨
+    thread_exit();
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -302,7 +284,29 @@ void process_exit(void)
      * TODO: Implement process termination message (see
      * TODO: project2/process_termination.html).
      * TODO: We recommend you to implement process resource cleanup here. */
+
+    /* file clean up */
+    for (int i = 2; i < 128; ++i)
+    {
+        file_close(*(curr->fdt + i));
+        *(curr->fdt + i) = NULL; // null 처리 해줘야 한다.
+    }
+
+    palloc_free_multiple(curr->fdt, 2);
+    file_close(curr->running_file);
+    curr->running_file = NULL;
+
     process_cleanup();
+    sema_up(&curr->exit_wait);
+
+    struct list *children = &curr->children;
+    for (struct list_elem *p = list_begin(children); p != list_end(children); p = list_next(p))
+    {
+        struct thread *child = list_entry(p, struct thread, c_elem);
+        sema_up(&child->clear_wait);
+    }
+
+    sema_down(&curr->clear_wait);
 }
 
 /* Free the current process's resources. */
@@ -427,7 +431,6 @@ load(const char *file_name, struct intr_frame *if_)
     process_activate(thread_current());
 
     /* Parsing File_Name */
-
     char *argv[64];
     int argc = 0;
 

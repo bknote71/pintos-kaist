@@ -130,6 +130,7 @@ struct thread
     /* Semaphore */
     struct semaphore exit_wait;
     struct semaphore create_wait;
+    struct semaphore clear_wait;
 
     /* exit status */
     int exit;
