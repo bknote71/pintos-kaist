@@ -184,7 +184,6 @@ __do_fork(void *aux)
         struct file *fp = *(parent->fdt + i);
         *(current->fdt + i) = fp != NULL ? file_duplicate(fp) : NULL;
     }
-    current->next_fd = parent->next_fd;
 
     sema_up(&current->create_wait);
 

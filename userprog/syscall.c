@@ -27,8 +27,8 @@ static int exec(const char *cmd_line);
 static int wait(tid_t tid);
 static struct file *get_file(int fd);
 static int set_next_fd();
-static void address_validate(void *ptr, void *lock);
-static void fd_validate(int fd, void *lock);
+static void address_validate(void *ptr);
+static void fd_validate(int fd);
 static struct thread *find_child(int pid);
 
 /* System call.
@@ -86,7 +86,7 @@ void syscall_handler(struct intr_frame *f)
         break;
     case SYS_FORK:
         tn = f->R.rdi;
-        address_validate(tn, NULL);
+        address_validate(tn);
 
         // 자식 id 반환
         pid = process_fork(tn, f);
@@ -102,55 +102,52 @@ void syscall_handler(struct intr_frame *f)
 
     case SYS_EXEC:
         fn = f->R.rdi;
-        address_validate(fn, NULL);
+        address_validate(fn);
 
         // page 를 만들어야 하나?
         char *exec_cmd = palloc_get_page(0);
         if (exec_cmd == NULL)
             exit(-1);
         strlcpy(exec_cmd, fn, PGSIZE);
-        if ((ret = exec(exec_cmd)) < 0)
-            exit(-1);
+        exec(exec_cmd);
+        exit(-1);
 
-        f->R.rax = ret;
         break;
     case SYS_WAIT:
         f->R.rax = wait(f->R.rdi);
-
         break;
 
     case SYS_CREATE:
-        lock_acquire(&filesys_lock);
-
         fn = f->R.rdi;
-        address_validate(fn, &filesys_lock);
-
         size = f->R.rsi;
-        fret = filesys_create(fn, (off_t)size);
-        f->R.rax = fret;
 
+        address_validate(fn);
+
+        lock_acquire(&filesys_lock);
+        fret = filesys_create(fn, (off_t)size);
         lock_release(&filesys_lock);
+
+        f->R.rax = fret;
         break;
 
     case SYS_REMOVE:
-        lock_acquire(&filesys_lock);
-
         fn = f->R.rdi;
 
-        address_validate(fn, &filesys_lock);
+        address_validate(fn);
 
+        lock_acquire(&filesys_lock);
         fret = filesys_remove(fn);
-        f->R.rax = fret;
 
         lock_release(&filesys_lock);
+
+        f->R.rax = fret;
         break;
 
     case SYS_OPEN:
-        lock_acquire(&filesys_lock);
-
         fn = f->R.rdi;
-        address_validate(fn, &filesys_lock);
+        address_validate(fn);
 
+        lock_acquire(&filesys_lock);
         ff = filesys_open(fn);
         if (ff == NULL)
             f->R.rax = -1;
@@ -168,36 +165,37 @@ void syscall_handler(struct intr_frame *f)
         break;
 
     case SYS_FILESIZE:
-        lock_acquire(&filesys_lock);
-
         fd = f->R.rdi;
-        // fd 를 사용해서 파일 탐색
+        fd_validate(fd);
+
+        lock_acquire(&filesys_lock);
         ff = get_file(fd);
         fret = ff == NULL ? -1 : (int)file_length(ff);
-        f->R.rax = fret;
 
         lock_release(&filesys_lock);
+
+        f->R.rax = fret;
         break;
 
     case SYS_READ:
-        lock_acquire(&filesys_lock);
-
         fd = f->R.rdi;
         buffer = (void *)f->R.rsi;
         size = (unsigned)f->R.rdx;
 
-        fd_validate(fd, &filesys_lock);
-        address_validate(buffer, NULL);
+        fd_validate(fd);
+        address_validate(buffer);
 
         if (fd == 0)
             fret = (int)input_getc();
         else if (fd == 1) // could not read
             fret = -1;
         else
+        {
+            lock_acquire(&filesys_lock);
             fret = (int)file_read(get_file(fd), buffer, size);
-
+            lock_release(&filesys_lock);
+        }
         f->R.rax = fret; // read bytes?
-        lock_release(&filesys_lock);
         break;
 
     case SYS_WRITE:
@@ -206,8 +204,8 @@ void syscall_handler(struct intr_frame *f)
         buffer = (void *)f->R.rsi;
         size = (unsigned)f->R.rdx;
 
-        fd_validate(fd, NULL);
-        address_validate(buffer, NULL);
+        fd_validate(fd);
+        address_validate(buffer);
 
         if (fd == 0)
             exit(-1);
@@ -223,14 +221,13 @@ void syscall_handler(struct intr_frame *f)
             lock_release(&filesys_lock);
         }
         f->R.rax = fret; // write bytes?
-
         break;
 
     case SYS_SEEK:
         fd = f->R.rdi;
-        position = (unsigned)f->R.rsi;
+        position = f->R.rsi;
 
-        fd_validate(fd, NULL);
+        fd_validate(fd);
 
         file_seek(get_file(fd), position);
         break;
@@ -246,7 +243,6 @@ void syscall_handler(struct intr_frame *f)
         ff = get_file(fd);
         if (ff == NULL)
             exit(-1);
-
         // fd 삭제 방식
         *(curr->fdt + fd) = NULL;
         file_close(ff);
@@ -296,22 +292,18 @@ set_next_fd()
     return -1;
 }
 
-static void address_validate(void *ptr, void *lock)
+static void address_validate(void *ptr)
 {
     if (ptr == NULL || !is_user_vaddr((uint64_t)ptr) || pml4_get_page(thread_current()->pml4, ptr) == NULL)
     {
-        if (lock != NULL)
-            lock_release(((struct lock *)lock));
         exit(-1);
     }
 }
 
-static void fd_validate(int fd, void *lock)
+static void fd_validate(int fd)
 {
     if (fd < 0 || fd >= 128)
     {
-        if (lock != NULL)
-            lock_release(((struct lock *)lock));
         exit(-1);
     }
 }
