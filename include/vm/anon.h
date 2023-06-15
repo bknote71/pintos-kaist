@@ -4,10 +4,12 @@
 struct page;
 enum vm_type;
 
-struct anon_page {
+struct anon_page
+{
+    size_t offset;
 };
 
-void vm_anon_init (void);
-bool anon_initializer (struct page *page, enum vm_type type, void *kva);
+void vm_anon_init(void);
+bool anon_initializer(struct page *page, enum vm_type type, void *kva);
 
 #endif

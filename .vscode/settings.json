@@ -16,6 +16,21 @@
     "__mutex_base": "c",
     "atomic": "c",
     "syscall.h": "c",
-    "off_t.h": "c"
+    "off_t.h": "c",
+    "bitset": "cpp",
+    "optional": "cpp",
+    "string": "cpp",
+    "string_view": "cpp",
+    "system_error": "cpp",
+    "thread": "cpp",
+    "type_traits": "cpp",
+    "variant": "cpp",
+    "vector": "cpp",
+    "vm.h": "c",
+    "thread.h": "c",
+    "bitmap.h": "c",
+    "ostream": "c",
+    "new": "c",
+    "malloc.h": "c"
   }
 }

@@ -258,8 +258,7 @@ tid_t thread_create(const char *name, int priority,
     list_push_back(&curr->children, &t->c_elem);
 
     /* File setting */
-    // t->fdt = palloc_get_multiple(PAL_ZERO, FDT_PAGES);
-    t->fdt = (struct file **)calloc(FDT_MAX_COUNT, sizeof(struct file *));
+    t->fdt = palloc_get_page(PAL_ZERO);
     if (t->fdt == NULL)
         return TID_ERROR;
 
