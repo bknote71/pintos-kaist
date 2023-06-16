@@ -45,6 +45,8 @@ bool anon_initializer(struct page *page, enum vm_type type, void *kva)
 
     struct anon_page *anon_page = &page->anon;
     anon_page->offset = 0;
+
+    return true;
 }
 
 /* Swap in the page by read contents from the swap disk. */
@@ -59,6 +61,7 @@ anon_swap_in(struct page *page, void *kva)
         disk_read(swap_disk, anon_page->offset + i, kva + (i * DISK_SECTOR_SIZE));
         bitmap_flip(swap_bitmap, anon_page->offset + i);
     }
+    return true;
 }
 
 /* Swap out the page by writing contents to the swap disk. */
@@ -98,11 +101,11 @@ anon_destroy(struct page *page)
     struct anon_page *anon_page = &page->anon;
     struct frame *frame = page->frame;
     size_t offset;
-    if (frame != NULL)
+    if (frame != NULL) // frame 해제
     {
         uint64_t *pml4 = frame->th->pml4;
         pml4_clear_page(pml4, page->va);
-        palloc_free_page(frame);
+        vm_free_frame(frame);
     }
     else if ((offset = bitmap_scan(swap_bitmap, anon_page->offset, SLOT, 1)) == anon_page->offset) // in swap space
     {

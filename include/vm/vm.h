@@ -1,5 +1,6 @@
 #ifndef VM_VM_H
 #define VM_VM_H
+#include "lib/kernel/hash.h"
 #include "threads/palloc.h"
 #include <stdbool.h>
 
@@ -28,6 +29,7 @@ enum vm_type
 #include "vm/anon.h"
 #include "vm/file.h"
 #include "vm/uninit.h"
+
 #ifdef EFILESYS
 #include "filesys/page_cache.h"
 #endif
@@ -49,6 +51,7 @@ struct page
 
     /* Your implementation */
     struct hash_elem h_elem;
+    struct list_elem p_elem;
     int rw;
 
     /* Per-type data are binded into the union.
@@ -91,24 +94,25 @@ struct page_operations
     if ((page)->operations->destroy) \
     (page)->operations->destroy(page)
 
-#include "lib/kernel/hash.h"
 /* Representation of current process's memory space.
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table
 {
     struct hash pages;
-    struct lock page_lock;
+    // struct lock page_lock;
 };
 
-struct bfpage
+struct file_segment
 {
     struct file *file;
-    size_t read_bytes;
-    size_t zero_bytes;
+    off_t offset;
+    off_t read_bytes;
+    off_t zero_bytes;
 };
 
 #include "threads/thread.h"
+
 void supplemental_page_table_init(struct supplemental_page_table *spt);
 bool supplemental_page_table_copy(struct supplemental_page_table *dst,
                                   struct supplemental_page_table *src);
@@ -129,5 +133,10 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 void vm_dealloc_page(struct page *page);
 bool vm_claim_page(void *va);
 enum vm_type page_get_type(struct page *page);
+
+bool setup_page_table(void *upage, void *kpage, bool writable);
+void vm_free_frame(struct frame *frame);
+
+struct lock lru_lock;
 
 #endif /* VM_VM_H */

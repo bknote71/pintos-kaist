@@ -19,16 +19,23 @@
 #include "string.h"
 #include "threads/palloc.h"
 
+#include "vm/file.h"
+#include "vm/vm.h"
+
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
 /* syscall handler function */
 static int exec(const char *cmd_line);
 static int wait(tid_t tid);
+static int mmap(int fd, void *addr);
+static void munmap(int mapid);
+
 static struct file *get_file(int fd);
 static int set_file_to_nextfd(struct file *file);
 static void address_validate(void *ptr);
 static void fd_validate(int fd);
+static void mmap_validate(void *addr);
 
 /* System call.
  *
@@ -64,13 +71,15 @@ void syscall_handler(struct intr_frame *f)
     struct thread *curr = thread_current();
     struct thread *child;
     enum intr_level intr;
-    int sysnum = f->R.rax;
 
     char *tn, *fn;
     unsigned size, position;
     int pid, status, fd, fret, ret, nd;
     struct file *ff;
     void *buffer;
+
+    curr->isp = f->rsp;
+    int sysnum = f->R.rax;
 
     switch (sysnum)
     {
@@ -243,6 +252,14 @@ void syscall_handler(struct intr_frame *f)
         file_close(ff);
         break;
 
+    case SYS_MMAP:
+        address_validate(f->R.rsi);
+        f->R.rax = mmap(f->R.rdi, f->R.rsi);
+        break;
+
+    case SYS_MUNMAP:
+        munmap(f->R.rdi);
+
     default:
         break;
     }
@@ -258,6 +275,38 @@ static int exec(const char *cmd_line)
 static int wait(tid_t tid)
 {
     return process_wait(tid);
+}
+
+static int mmap(int fd, void *addr)
+{
+    struct thread *curr = thread_current();
+    struct file *file;
+    file = get_file(fd);
+
+    off_t length = file_length(file);
+    if (length == 0)
+        exit(-1);
+
+    // do_mmap(void *addr, size_t length, int writable, struct file *file, off_t offset)
+    do_mmap(addr, length, false, file, file_tell(file));
+}
+static void munmap(int mapid)
+{
+    struct mmap_file *mf = find_mmfile(mapid);
+    if (mf == NULL)
+        exit(-1);
+    struct list *pagelist = &mf->page_list;
+    struct list_elem *p;
+
+    for (p = list_begin(pagelist); p != list_end(pagelist); p = list_next(p))
+    {
+        struct page *entry = list_entry(p, struct page, p_elem);
+        mmap_validate(entry->va);
+        do_munmap(entry->va);
+    }
+
+    free(mf);
+    return;
 }
 
 static struct file *
@@ -291,7 +340,7 @@ set_file_to_nextfd(struct file *file)
 
 static void address_validate(void *ptr)
 {
-    if (ptr == NULL || !is_user_vaddr((uint64_t)ptr) || pml4_get_page(thread_current()->pml4, ptr) == NULL)
+    if (ptr == NULL || !is_user_vaddr((uint64_t)ptr))
     {
         exit(-1);
     }
@@ -303,4 +352,13 @@ static void fd_validate(int fd)
     {
         exit(-1);
     }
+}
+
+static void mmap_validate(void *addr)
+{
+    if (((uint64_t)addr & ~PGSIZE))
+        exit(-1);
+    uint64_t *pml4 = thread_current()->pml4;
+    if (pml4_get_page(pml4, addr))
+        exit(-1);
 }

@@ -31,6 +31,26 @@
     "bitmap.h": "c",
     "ostream": "c",
     "new": "c",
-    "malloc.h": "c"
-  }
+    "malloc.h": "c",
+    "__verbose_abort": "c",
+    "typeinfo": "c",
+    "algorithm": "c",
+    "complex": "c",
+    "uninit.h": "c",
+    "__hash_table": "c",
+    "__tuple": "c",
+    "array": "c",
+    "limits": "c",
+    "ratio": "c",
+    "tuple": "c",
+    "chrono": "c",
+    "compare": "c",
+    "cstddef": "c",
+    "anon.h": "c",
+    "page_cache.h": "c",
+    "stdbool.h": "c",
+    "synch.h": "c",
+    "palloc.h": "c"
+  },
+  "C_Cpp.dimInactiveRegions": false
 }

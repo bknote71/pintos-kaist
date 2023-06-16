@@ -530,6 +530,12 @@ init_thread(struct thread *t, const char *name, int priority)
 
     /* for File */
     t->next_fd = 1;
+
+    /* for isp */
+    t->isp = 0;
+
+    /* for mmap_list */
+    list_init(&t->mmap_list);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Shoulsd

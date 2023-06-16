@@ -19,10 +19,10 @@
 #include <round.h>
 #include <stdio.h>
 #include <string.h>
-// #ifdef VM
-// #include "vm/vm.h"
-// #endif
+#ifdef VM
 #include "vm/vm.h"
+#endif
+// #include "vm/vm.h"
 
 static void process_cleanup(void);
 static bool load(const char *file_name, struct intr_frame *if_);
@@ -166,6 +166,7 @@ __do_fork(void *aux)
     if (!supplemental_page_table_copy(&current->spt, &parent->spt))
         goto error;
 #else
+
     if (!pml4_for_each(parent->pml4, duplicate_pte, parent))
         goto error;
 
@@ -298,7 +299,15 @@ process_cleanup(void)
     struct thread *curr = thread_current();
 
 #ifdef VM
+    struct list *mlist = &curr->mmap_list;
+    struct list_elem *p;
+    for (p = list_begin(mlist); p != list_end(p); p = list_next(p))
+    {
+        struct mmap_file *mf = list_entry(p, struct mmap_file, m_elem);
+        free(mf);
+    }
     supplemental_page_table_kill(&curr->spt);
+
 #endif
 
     uint64_t *pml4;
@@ -677,24 +686,6 @@ setup_stack(struct intr_frame *if_)
     return success;
 }
 #else
-/* Adds a mapping from user virtual address UPAGE to kernel
- * virtual address KPAGE to the page table.
- * If WRITABLE is true, the user process may modify the page;
- * otherwise, it is read-only.
- * UPAGE must not already be mapped.
- * KPAGE should probably be a page obtained from the user pool
- * with palloc_get_page().
- * Returns true on success, f alse if UPAGE is already mapped or
- * if memory allocation fails. */
-bool install_page(void *upage, void *kpage, bool writable)
-{
-    struct thread *t = thread_current();
-
-    /* Verify that there's not already a page at that virtual
-     * address, then map our page there. */
-    return (pml4_get_page(t->pml4, upage) == NULL && pml4_set_page(t->pml4, upage, kpage, writable));
-}
-
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
@@ -705,13 +696,13 @@ lazy_load_segment(struct page *page, void *aux)
     /* TODO: Load the segment from the file */
     /* TODO: This called when the first page fault occurs on address VA. */
     /* TODO: VA is available when calling this function. */
-    struct file_page *fp = (struct file_page *)aux;
-    struct file *file = fp->file;
-    off_t offset = fp->offset;
-    size_t page_read_bytes = fp->read_bytes;
-    size_t page_zero_bytes = fp->zero_bytes;
+    struct file_segment *fs = (struct file_segment *)aux;
+    struct file *file = fs->file;
+    off_t offset = fs->offset;
+    size_t page_read_bytes = fs->read_bytes;
+    size_t page_zero_bytes = fs->zero_bytes;
 
-    free(fp);
+    free(fs);
 
     void *kpage = page->frame->kva;
 
@@ -723,12 +714,11 @@ lazy_load_segment(struct page *page, void *aux)
 
     memset(kpage + page_read_bytes, 0, page_zero_bytes);
 
-    /* Add the page to the process's address space. */
-    if (!install_page(page->va, kpage, page->rw))
-    {
-        printf("lazy load fail\n");
-        return false;
-    }
+    // if (!install_page(page->va, kpage, page->rw))
+    // {
+    //     printf("lazy load fail\n");
+    //     return false;
+    // }
     return true;
 }
 
@@ -764,13 +754,13 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
 
         /* TODO: Set up aux to pass information to the lazy_load_segment. */
 
-        struct file_page *fp = (struct file_page *)malloc(sizeof(struct file_page));
-        fp->file = file;
-        fp->offset = ofs;
-        fp->read_bytes = page_read_bytes;
-        fp->zero_bytes = page_zero_bytes;
+        struct file_segment *fs = (struct file_segment *)malloc(sizeof(struct file_segment));
+        fs->file = file;
+        fs->offset = ofs;
+        fs->read_bytes = page_read_bytes;
+        fs->zero_bytes = page_zero_bytes;
 
-        void *aux = fp;
+        void *aux = fs;
         if (!vm_alloc_page_with_initializer(VM_ANON, upage,
                                             writable, lazy_load_segment, aux))
             return false;
@@ -795,21 +785,12 @@ setup_stack(struct intr_frame *if_)
      * TODO: If success, set the rsp accordingly.
      * TODO: You should mark the page is stack. */
     /* TODO: Your code goes here */
-    uint8_t *kpage;
-    bool success = false;
-
-    kpage = palloc_get_page(PAL_USER | PAL_ZERO);
-    if (kpage != NULL)
+    if (vm_alloc_page(VM_MARKER_0, stack_bottom, 1))
     {
-        success = install_page(stack_bottom, kpage, true);
+        success = vm_claim_page(stack_bottom);
         if (success)
             if_->rsp = USER_STACK;
-        else
-            palloc_free_page(kpage);
     }
-
-    if (vm_alloc_page(VM_MARKER_0, stack_bottom, 1))
-        success = false;
 
     return success;
 }

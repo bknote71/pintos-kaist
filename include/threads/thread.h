@@ -6,12 +6,15 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+
 #ifdef VM
 #include "vm/vm.h"
 #endif
 
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+
+struct supplemental_page_table;
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -115,6 +118,7 @@ struct thread
     /* Owned by userprog/process.c. */
     uint64_t *pml4; /* Page map level 4 */
 #endif
+
 #ifdef VM
     /* Table for whole virtual memory owned by thread. */
     struct supplemental_page_table spt;
@@ -143,6 +147,12 @@ struct thread
     struct file *running_file;
     struct file **fdt;
     int next_fd;
+
+    /* for initial transition stack pointer */
+    uintptr_t isp;
+
+    /* for mmap */
+    struct list mmap_list;
 };
 
 /* If false (default), use round-robin scheduler.

@@ -14,6 +14,13 @@ struct file_page
     off_t zero_bytes;
 };
 
+struct mmap_file
+{
+    int mapid;
+    struct list_elem m_elem;
+    struct list page_list;
+};
+
 void vm_file_init(void);
 bool file_backed_initializer(struct page *page, enum vm_type type, void *kva);
 void *do_mmap(void *addr, size_t length, int writable,
@@ -21,4 +28,6 @@ void *do_mmap(void *addr, size_t length, int writable,
 void do_munmap(void *va);
 
 bool load_file(struct page *page, void *aux);
+struct mmap_file *find_mmfile(int mapid);
+
 #endif
