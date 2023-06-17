@@ -291,6 +291,20 @@ static int read(int fd, void *buffer, size_t size)
 {
     fd_validate(fd);
     validate_address(buffer);
+    // buffer 페이지에 대해서 읽기만 있으면 안된다.
+#ifdef VM
+
+    // 진짜 중요: spt find page 에서 va 로 찾을 때 va 는 페이지 단위여야 한다.
+    // 꼭 명심하도록 하자!!!
+
+    struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
+    if (page == NULL || !page->rw)
+        exit(-1);
+    // 페이지가 존재하지만 스택영역 + 그중에서도 sp 보다 더 작다? 그러면 안된다!
+    uintptr_t isp = thread_current()->isp;
+    if (page->va == pg_round_down(isp) && buffer < isp)
+        exit(-1);
+#endif
 
     int ret;
 

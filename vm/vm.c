@@ -238,17 +238,15 @@ vm_stack_growth(void *addr UNUSED)
 {
     // rsp 가 addr 보다 작아질 때까지
     struct thread *curr = thread_current();
-    uintptr_t sp = curr->isp;
-    uintptr_t va = addr;
+    uintptr_t asb = (uintptr_t)pg_round_down(curr->isp);
 
-    while (sp >= va)
+    while (asb > (uintptr_t)addr)
     {
-        sp -= PGSIZE;
-        if (USER_STACK - sp > USER_STACK_LIMIT)
-            if (vm_alloc_page(VM_ANON, sp, 1))
-            {
-                vm_claim_page(sp);
-            }
+        asb -= PGSIZE;
+        if (vm_alloc_page(VM_ANON, asb, 1))
+        {
+            vm_claim_page(asb);
+        }
     }
 }
 
@@ -263,7 +261,6 @@ vm_handle_wp(struct page *page UNUSED)
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
                          bool user UNUSED, bool write UNUSED, bool not_present UNUSED)
 {
-    // printf("addr? %p\n", addr);
     // printf("page fault! %d %d %d\n", user, write, not_present);
     struct supplemental_page_table *spt = &thread_current()->spt;
     struct page *page = NULL;
@@ -288,7 +285,8 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
         // allocated stack boundary
         uintptr_t sp = thread_current()->isp;
         uintptr_t asb = (uintptr_t)pg_round_down(sp);
-        stack_growth = (asb > (uintptr_t)addr && sp - 8 <= (uintptr_t)addr);
+        stack_growth = (write && addr < asb && addr >= USER_STACK - USER_STACK_LIMIT);
+        // printf("sp: %p, asb: %p, add: %p, stack growth? %d\n", sp, asb, addr, stack_growth);
     }
     else if (page->rw < write)
         return false;
@@ -315,7 +313,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
     else
         success = false;
 
-    return success;
+    return (success || stack_growth);
 }
 
 static bool validate_fault(void *addr, bool user, bool not_present)
