@@ -61,6 +61,7 @@ anon_swap_in(struct page *page, void *kva)
         disk_read(swap_disk, anon_page->offset + i, kva + (i * DISK_SECTOR_SIZE));
         bitmap_flip(swap_bitmap, anon_page->offset + i);
     }
+
     return true;
 }
 

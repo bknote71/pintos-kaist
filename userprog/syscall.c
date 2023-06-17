@@ -19,21 +19,31 @@
 #include "string.h"
 #include "threads/palloc.h"
 
+#ifdef VM
 #include "vm/file.h"
 #include "vm/vm.h"
+#endif
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
 /* syscall handler function */
-static int exec(const char *cmd_line);
+
+static int fork(char *, struct intr_frame *);
+static void exec(const char *cmd_line);
 static int wait(tid_t tid);
+
+static int open(char *);
+static int write(int, void *, size_t);
+static int read(int, void *, size_t);
+
 static int mmap(int fd, void *addr);
 static void munmap(int mapid);
 
 static struct file *get_file(int fd);
 static int set_file_to_nextfd(struct file *file);
-static void address_validate(void *ptr);
+static void validate_address(void *ptr);
+
 static void fd_validate(int fd);
 static void mmap_validate(void *addr);
 
@@ -76,10 +86,10 @@ void syscall_handler(struct intr_frame *f)
     unsigned size, position;
     int pid, status, fd, fret, ret, nd;
     struct file *ff;
-    void *buffer;
 
     curr->isp = f->rsp;
     int sysnum = f->R.rax;
+    // printf("sysnum: %d\n", sysnum);
 
     switch (sysnum)
     {
@@ -93,34 +103,13 @@ void syscall_handler(struct intr_frame *f)
 
         break;
     case SYS_FORK:
-        tn = f->R.rdi;
-        address_validate(tn);
-
-        // 자식 id 반환
-        pid = process_fork(tn, f);
-        if (pid != TID_ERROR)
-        {
-            child = find_child_by_id(pid);
-            sema_down(&child->create_wait);
-            pid = child->exit == TID_ERROR ? TID_ERROR : pid;
-        }
-
-        f->R.rax = pid;
+        f->R.rax = fork(f->R.rdi, f);
         break;
 
     case SYS_EXEC:
-        fn = f->R.rdi;
-        address_validate(fn);
-
-        // page 를 만들어야 하나?
-        char *exec_cmd = palloc_get_page(0);
-        if (exec_cmd == NULL)
-            exit(-1);
-        strlcpy(exec_cmd, fn, PGSIZE);
-        exec(exec_cmd);
-        exit(-1);
-
+        exec(f->R.rdi);
         break;
+
     case SYS_WAIT:
         f->R.rax = wait(f->R.rdi);
         break;
@@ -129,7 +118,7 @@ void syscall_handler(struct intr_frame *f)
         fn = f->R.rdi;
         size = f->R.rsi;
 
-        address_validate(fn);
+        validate_address(fn);
 
         lock_acquire(&filesys_lock);
         fret = filesys_create(fn, (off_t)size);
@@ -141,7 +130,7 @@ void syscall_handler(struct intr_frame *f)
     case SYS_REMOVE:
         fn = f->R.rdi;
 
-        address_validate(fn);
+        validate_address(fn);
 
         lock_acquire(&filesys_lock);
         fret = filesys_remove(fn);
@@ -152,22 +141,7 @@ void syscall_handler(struct intr_frame *f)
         break;
 
     case SYS_OPEN:
-        fn = f->R.rdi;
-        address_validate(fn);
-
-        lock_acquire(&filesys_lock);
-        ff = filesys_open(fn);
-        if (ff == NULL)
-            f->R.rax = -1;
-        else
-        {
-            nd = set_file_to_nextfd(ff);
-            if (nd == -1)
-                file_close(ff);
-            f->R.rax = nd;
-        }
-
-        lock_release(&filesys_lock);
+        f->R.rax = open(f->R.rdi);
         break;
 
     case SYS_FILESIZE:
@@ -184,49 +158,11 @@ void syscall_handler(struct intr_frame *f)
         break;
 
     case SYS_READ:
-        fd = f->R.rdi;
-        buffer = (void *)f->R.rsi;
-        size = (unsigned)f->R.rdx;
-
-        fd_validate(fd);
-        address_validate(buffer);
-
-        if (fd == 0)
-            fret = (int)input_getc();
-        else if (fd == 1) // could not read
-            fret = -1;
-        else
-        {
-            lock_acquire(&filesys_lock);
-            fret = (int)file_read(get_file(fd), buffer, size);
-            lock_release(&filesys_lock);
-        }
-        f->R.rax = fret; // read bytes?
+        f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
         break;
 
     case SYS_WRITE:
-
-        fd = f->R.rdi;
-        buffer = (void *)f->R.rsi;
-        size = (unsigned)f->R.rdx;
-
-        fd_validate(fd);
-        address_validate(buffer);
-
-        if (fd == 0)
-            exit(-1);
-        else if (fd == 1)
-        {
-            putbuf(buffer, size);
-            fret = size;
-        }
-        else
-        {
-            lock_acquire(&filesys_lock);
-            fret = (int)file_write(get_file(fd), buffer, size);
-            lock_release(&filesys_lock);
-        }
-        f->R.rax = fret; // write bytes?
+        f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
         break;
 
     case SYS_SEEK:
@@ -253,7 +189,7 @@ void syscall_handler(struct intr_frame *f)
         break;
 
     case SYS_MMAP:
-        address_validate(f->R.rsi);
+        validate_address(f->R.rsi);
         f->R.rax = mmap(f->R.rdi, f->R.rsi);
         break;
 
@@ -267,9 +203,36 @@ void syscall_handler(struct intr_frame *f)
     do_iret(f);
 }
 
-static int exec(const char *cmd_line)
+static int fork(char *name, struct intr_frame *if_)
 {
-    return process_exec(cmd_line);
+    validate_address(name);
+
+    struct thread *child;
+    int pid;
+
+    // 자식 id 반환
+    pid = process_fork(name, if_);
+    if (pid != TID_ERROR)
+    {
+        child = find_child_by_id(pid);
+        sema_down(&child->create_wait);
+        pid = child->exit == TID_ERROR ? TID_ERROR : pid;
+    }
+
+    return pid;
+}
+
+static void exec(const char *cmd_line)
+{
+    validate_address(cmd_line);
+
+    // page 를 만들어야 하나?
+    char *exec_cmd = palloc_get_page(0);
+    if (exec_cmd == NULL)
+        exit(-1);
+    strlcpy(exec_cmd, cmd_line, PGSIZE);
+    process_exec(exec_cmd);
+    exit(-1);
 }
 
 static int wait(tid_t tid)
@@ -277,36 +240,104 @@ static int wait(tid_t tid)
     return process_wait(tid);
 }
 
+static int open(char *name)
+{
+    validate_address(name);
+
+    struct file *file;
+    int nextfd;
+    // char *filename = allocate_name_page(name);
+
+    lock_acquire(&filesys_lock);
+
+    file = filesys_open(name);
+    if (file == NULL)
+        return -1;
+    else
+    {
+        nextfd = set_file_to_nextfd(file);
+        if (nextfd == -1)
+            file_close(file);
+    }
+
+    lock_release(&filesys_lock);
+
+    return nextfd;
+}
+static int write(int fd, void *buffer, size_t size)
+{
+    fd_validate(fd);
+    validate_address(buffer);
+
+    int ret;
+
+    if (fd == 0)
+        exit(-1);
+    else if (fd == 1)
+    {
+        putbuf(buffer, size);
+        ret = size;
+    }
+    else
+    {
+        lock_acquire(&filesys_lock);
+        ret = (int)file_write(get_file(fd), buffer, size);
+        lock_release(&filesys_lock);
+    }
+    return ret;
+}
+
+static int read(int fd, void *buffer, size_t size)
+{
+    fd_validate(fd);
+    validate_address(buffer);
+
+    int ret;
+
+    if (fd == 0)
+        ret = (int)input_getc();
+    else if (fd == 1) // could not read
+        ret = -1;
+    else
+    {
+        lock_acquire(&filesys_lock);
+        ret = (int)file_read(get_file(fd), buffer, size);
+        lock_release(&filesys_lock);
+    }
+
+    return ret;
+}
+
 static int mmap(int fd, void *addr)
 {
-    struct thread *curr = thread_current();
-    struct file *file;
-    file = get_file(fd);
+    // struct thread *curr = thread_current();
+    // struct file *file;
+    // file = get_file(fd);
 
-    off_t length = file_length(file);
-    if (length == 0)
-        exit(-1);
+    // off_t length = file_length(file);
+    // if (length == 0)
+    //     exit(-1);
 
-    // do_mmap(void *addr, size_t length, int writable, struct file *file, off_t offset)
-    do_mmap(addr, length, false, file, file_tell(file));
+    // // do_mmap(void *addr, size_t length, int writable, struct file *file, off_t offset)
+    // do_mmap(addr, length, false, file, file_tell(file));
 }
 static void munmap(int mapid)
 {
-    struct mmap_file *mf = find_mmfile(mapid);
-    if (mf == NULL)
-        exit(-1);
-    struct list *pagelist = &mf->page_list;
-    struct list_elem *p;
+    // struct mmap_file *mf = find_mmfile(mapid);
+    // if (mf == NULL)
+    //     exit(-1);
+    // struct list *pagelist = &mf->page_list;
+    // struct list_elem *p;
 
-    for (p = list_begin(pagelist); p != list_end(pagelist); p = list_next(p))
-    {
-        struct page *entry = list_entry(p, struct page, p_elem);
-        mmap_validate(entry->va);
-        do_munmap(entry->va);
-    }
+    // for (p = list_begin(pagelist); p != list_end(pagelist); p = list_next(p))
+    // {
+    //     struct page *entry = list_entry(p, struct page, p_elem);
+    //     mmap_validate(entry->va);
+    //     do_munmap(entry->va);
+    // }
 
-    free(mf);
-    return;
+    // free(mf);
+    // return;
 }
 
 static struct file *
@@ -338,7 +369,7 @@ set_file_to_nextfd(struct file *file)
     return -1;
 }
 
-static void address_validate(void *ptr)
+static void validate_address(void *ptr)
 {
     if (ptr == NULL || !is_user_vaddr((uint64_t)ptr))
     {

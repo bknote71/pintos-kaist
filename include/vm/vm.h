@@ -1,7 +1,8 @@
 #ifndef VM_VM_H
 #define VM_VM_H
-#include "lib/kernel/hash.h"
+#include "hash.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include <stdbool.h>
 
 enum vm_type
@@ -100,18 +101,12 @@ struct page_operations
 struct supplemental_page_table
 {
     struct hash pages;
-    // struct lock page_lock;
-};
-
-struct file_segment
-{
-    struct file *file;
-    off_t offset;
-    off_t read_bytes;
-    off_t zero_bytes;
+    struct lock page_lock;
 };
 
 #include "threads/thread.h"
+
+struct lock lru_lock;
 
 void supplemental_page_table_init(struct supplemental_page_table *spt);
 bool supplemental_page_table_copy(struct supplemental_page_table *dst,
@@ -136,7 +131,5 @@ enum vm_type page_get_type(struct page *page);
 
 bool setup_page_table(void *upage, void *kpage, bool writable);
 void vm_free_frame(struct frame *frame);
-
-struct lock lru_lock;
 
 #endif /* VM_VM_H */

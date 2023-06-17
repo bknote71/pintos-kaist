@@ -166,12 +166,10 @@ __do_fork(void *aux)
     if (!supplemental_page_table_copy(&current->spt, &parent->spt))
         goto error;
 #else
-
     if (!pml4_for_each(parent->pml4, duplicate_pte, parent))
         goto error;
 
 #endif
-
     /* TODO: Your code goes here.
      * TODO: Hint) To duplicate the file object, use `file_duplicate`
      * TODO:       in include/filesys/file.h. Note that parent should not return
@@ -299,15 +297,14 @@ process_cleanup(void)
     struct thread *curr = thread_current();
 
 #ifdef VM
-    struct list *mlist = &curr->mmap_list;
-    struct list_elem *p;
-    for (p = list_begin(mlist); p != list_end(p); p = list_next(p))
-    {
-        struct mmap_file *mf = list_entry(p, struct mmap_file, m_elem);
-        free(mf);
-    }
+    // struct list *mlist = &curr->mmap_list;
+    // struct list_elem *p;
+    // while (!list_empty(mlist))
+    // {
+    //     struct mmap_file *mf = list_entry(list_pop_front(mlist), struct mmap_file, m_elem);
+    //     free(mf);
+    // }
     supplemental_page_table_kill(&curr->spt);
-
 #endif
 
     uint64_t *pml4;
@@ -599,7 +596,7 @@ validate_segment(const struct Phdr *phdr, struct file *file)
     return true;
 }
 
-#ifdef VM
+#ifndef VM
 /* Codes of this block will be ONLY USED DURING project 2.
  * If you want to implement the function for whole project 2, implement it
  * outside of #ifndef macro. */
@@ -685,6 +682,15 @@ setup_stack(struct intr_frame *if_)
     }
     return success;
 }
+
+static bool
+install_page(void *upage, void *kpage, bool writable)
+{
+    struct thread *t = thread_current();
+
+    return (pml4_get_page(t->pml4, upage) == NULL && pml4_set_page(t->pml4, upage, kpage, writable));
+}
+
 #else
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on the
@@ -693,32 +699,29 @@ setup_stack(struct intr_frame *if_)
 static bool
 lazy_load_segment(struct page *page, void *aux)
 {
+    ASSERT(page->frame != NULL);
+    ASSERT(aux != NULL);
+
+    void *kpage = page->frame->kva;
+
     /* TODO: Load the segment from the file */
     /* TODO: This called when the first page fault occurs on address VA. */
     /* TODO: VA is available when calling this function. */
-    struct file_segment *fs = (struct file_segment *)aux;
-    struct file *file = fs->file;
-    off_t offset = fs->offset;
-    size_t page_read_bytes = fs->read_bytes;
-    size_t page_zero_bytes = fs->zero_bytes;
+    struct file_page *fp = (struct file_page *)aux;
+    struct file *file = fp->file;
+    off_t offset = fp->offset;
+    size_t page_read_bytes = fp->read_bytes;
+    size_t page_zero_bytes = fp->zero_bytes;
 
-    free(fs);
-
-    void *kpage = page->frame->kva;
+    free(fp);
 
     /* Load this page. */
     if (file_read_at(file, kpage, page_read_bytes, offset) != (int)page_read_bytes)
     {
         return false;
     }
-
     memset(kpage + page_read_bytes, 0, page_zero_bytes);
 
-    // if (!install_page(page->va, kpage, page->rw))
-    // {
-    //     printf("lazy load fail\n");
-    //     return false;
-    // }
     return true;
 }
 
@@ -754,7 +757,7 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
 
         /* TODO: Set up aux to pass information to the lazy_load_segment. */
 
-        struct file_segment *fs = (struct file_segment *)malloc(sizeof(struct file_segment));
+        struct file_page *fs = (struct file_page *)malloc(sizeof(struct file_page));
         fs->file = file;
         fs->offset = ofs;
         fs->read_bytes = page_read_bytes;
@@ -785,7 +788,8 @@ setup_stack(struct intr_frame *if_)
      * TODO: If success, set the rsp accordingly.
      * TODO: You should mark the page is stack. */
     /* TODO: Your code goes here */
-    if (vm_alloc_page(VM_MARKER_0, stack_bottom, 1))
+
+    if (vm_alloc_page(VM_MARKER_0 | VM_ANON, stack_bottom, 1))
     {
         success = vm_claim_page(stack_bottom);
         if (success)

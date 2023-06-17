@@ -50,7 +50,8 @@
     "page_cache.h": "c",
     "stdbool.h": "c",
     "synch.h": "c",
-    "palloc.h": "c"
+    "palloc.h": "c",
+    "process.h": "c"
   },
   "C_Cpp.dimInactiveRegions": false
 }
