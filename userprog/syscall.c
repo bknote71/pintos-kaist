@@ -19,10 +19,10 @@
 #include "string.h"
 #include "threads/palloc.h"
 
-#ifdef VM
+// #ifdef VM
 #include "vm/file.h"
 #include "vm/vm.h"
-#endif
+// #endif
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -37,8 +37,8 @@ static int open(char *);
 static int write(int, void *, size_t);
 static int read(int, void *, size_t);
 
-static int mmap(int fd, void *addr);
-static void munmap(int mapid);
+static void *mmap(void *addr, size_t length, int writable, int fd, off_t offset);
+static void munmap(void *addr);
 
 static struct file *get_file(int fd);
 static int set_file_to_nextfd(struct file *file);
@@ -189,8 +189,7 @@ void syscall_handler(struct intr_frame *f)
         break;
 
     case SYS_MMAP:
-        validate_address(f->R.rsi);
-        f->R.rax = mmap(f->R.rdi, f->R.rsi);
+        f->R.rax = (uint64_t)mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
         break;
 
     case SYS_MUNMAP:
@@ -322,36 +321,49 @@ static int read(int fd, void *buffer, size_t size)
     return ret;
 }
 
-static int mmap(int fd, void *addr)
+static void *mmap(void *addr, size_t length, int writable, int fd, off_t offset)
 {
-    // struct thread *curr = thread_current();
-    // struct file *file;
-    // file = get_file(fd);
+    fd_validate(fd);
+    validate_address(addr);
 
-    // off_t length = file_length(file);
-    // if (length == 0)
-    //     exit(-1);
+    if (((uint64_t)addr % PGSIZE) != 0)
+        exit(-1);
 
-    // // do_mmap(void *addr, size_t length, int writable, struct file *file, off_t offset)
-    // do_mmap(addr, length, false, file, file_tell(file));
+    struct thread *curr = thread_current();
+    struct file *file = get_file(fd);
+
+    if (length == 0)
+        exit(-1);
+
+    off_t filelength = file_length(file);
+
+    if (length > filelength)
+        length = filelength;
+
+    return do_mmap(addr, length, writable, file, offset);
 }
-static void munmap(int mapid)
+static void munmap(void *addr)
 {
-    // struct mmap_file *mf = find_mmfile(mapid);
-    // if (mf == NULL)
-    //     exit(-1);
-    // struct list *pagelist = &mf->page_list;
-    // struct list_elem *p;
+    validate_address(addr);
+    // addr 가 PGSIZE 배수가 아니면 또 에러
+    if (((uint64_t)addr % PGSIZE) != 0)
+        exit(-1);
 
-    // for (p = list_begin(pagelist); p != list_end(pagelist); p = list_next(p))
-    // {
-    //     struct page *entry = list_entry(p, struct page, p_elem);
-    //     mmap_validate(entry->va);
-    //     do_munmap(entry->va);
-    // }
+    struct mmap_file *mf = find_mmfile(addr);
+    if (mf == NULL)
+        exit(-1);
 
-    // free(mf);
-    // return;
+    struct list *pagelist = &mf->page_list;
+    struct list_elem *p;
+
+    while (!list_empty(pagelist))
+    {
+        struct page *entry = list_entry(list_pop_front(pagelist), struct page, p_elem);
+        do_munmap(entry->va);
+    }
+    // 스레드에 mf 를 위한 락을 하나 설정해주자 나중에
+    list_remove(&mf->m_elem);
+    free(mf);
 }
 
 static struct file *

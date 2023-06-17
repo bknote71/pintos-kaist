@@ -16,7 +16,7 @@ struct file_page
 
 struct mmap_file
 {
-    int mapid;
+    void *start;
     struct list_elem m_elem;
     struct list page_list;
 };
@@ -28,6 +28,6 @@ void *do_mmap(void *addr, size_t length, int writable,
 void do_munmap(void *va);
 
 bool load_file(struct page *page, void *aux);
-struct mmap_file *find_mmfile(int mapid);
+struct mmap_file *find_mmfile(void *addr);
 
 #endif

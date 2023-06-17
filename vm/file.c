@@ -41,6 +41,7 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
 static bool
 file_backed_swap_in(struct page *page, void *kva)
 {
+    printf("file_backed swapin\n");
     struct file_page *file_page = &page->file;
     size_t page_read_bytes = file_page->read_bytes;
     size_t page_zero_bytes = file_page->zero_bytes;
@@ -103,12 +104,17 @@ do_mmap(void *addr, size_t length, int writable,
     struct thread *curr = thread_current();
     struct file_page *fp;
     struct page *mpage;
-    struct mmap_file *mf;
 
-    mf = (struct mmap_file *)malloc(sizeof(struct mmap_file));
+    struct mmap_file *mf = (struct mmap_file *)malloc(sizeof(struct mmap_file));
+
+    if (mf == NULL)
+        return NULL;
+
     list_init(&mf->page_list);
+    list_push_back(&curr->mmap_list, &mf->m_elem);
 
-    void *vaddr = addr;
+    mf->start = addr;
+
     while (length > 0)
     {
         size_t page_read_bytes = length < PGSIZE ? length : PGSIZE;
@@ -122,7 +128,7 @@ do_mmap(void *addr, size_t length, int writable,
 
         if (!vm_alloc_page_with_initializer(VM_FILE, addr,
                                             writable, load_file, fp))
-            return false;
+            return NULL;
 
         mpage = spt_find_page(&curr->spt, addr);
         list_push_back(&mf->page_list, &mpage->p_elem);
@@ -131,7 +137,8 @@ do_mmap(void *addr, size_t length, int writable,
         offset += page_read_bytes;
         addr += PGSIZE;
     }
-    return vaddr;
+
+    return mf->start; // 시작 주소 리턴
 }
 
 /* Do the munmap */
@@ -140,6 +147,7 @@ void do_munmap(void *addr)
     struct supplemental_page_table *spt = &thread_current()->spt;
     struct page *page;
     page = spt_find_page(spt, addr);
+    hash_delete(spt, &page->h_elem);
     vm_dealloc_page(page);
 }
 
@@ -169,12 +177,13 @@ bool load_file(struct page *page, void *aux)
     {
         return false;
     }
+
     memset(kpage + page_read_bytes, 0, page_zero_bytes);
 
     return true;
 }
 
-struct mmap_file *find_mmfile(int mapid)
+struct mmap_file *find_mmfile(void *addr)
 {
     struct thread *curr = thread_current();
     struct list *mlist = &curr->mmap_list;
@@ -182,7 +191,7 @@ struct mmap_file *find_mmfile(int mapid)
     for (p = list_begin(mlist); p != list_end(mlist); p = list_next(p))
     {
         struct mmap_file *mf = list_entry(p, struct mmap_file, m_elem);
-        if (mf->mapid == mapid)
+        if (mf->start == addr)
             return mf;
     }
     return NULL;
