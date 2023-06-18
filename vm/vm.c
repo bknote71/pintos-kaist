@@ -86,7 +86,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
     }
     else
     {
-        printf("upage is already existed\n");
+        // printf("upage is already existed\n");
         goto err;
     }
 
@@ -400,8 +400,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
     while (hash_next(&iter))
     {
         entry = hash_entry(hash_cur(&iter), struct page, h_elem);
-        type = entry->operations->type;
-        // printf("copy type: %d, va: %p\n", type, entry->va);
+        type = entry->operations->type; // 3 가지 케이스만: uninit, anon, file
 
         if (type == VM_UNINIT)
         {
@@ -418,6 +417,12 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
         }
         else if (type == VM_ANON)
         {
+            /*
+                VM_ANON + MARKER_0 까지 포함해야 한다.
+                참고로 offset 은 카피할 필요가 없다. 왜냐하면 offset 이 같으면 같은 스왑공간에 들어간다는 소리기 때문이죠.
+                최초에 vm_claim_page 로 스왑인 된 후, 페이지를 카피하고 나면
+                다시 스왑아웃 할 때. 본인만의 스왑 공간 위치(offset) 을 가지게 됨
+            */
             if (!vm_alloc_page(type, entry->va, entry->rw))
             {
                 printf("ANON 페이지 카피 실패\n");
@@ -428,8 +433,35 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             void *dest = spt_find_page(dst, entry->va)->frame->kva;
             memcpy(dest, entry->frame->kva, PGSIZE);
         }
+        else if (type == VM_FILE)
+        {
+            /*
+                file reopen << 꼭ㄴ
+                file 의 오프셋은 카피를 해야할까? 그래야하지 않을까?
+                원본이 쓰기중인 오프셋을 가지고 있다면, 당연히 거기서부터 시작해야 하는게 맞잖아
+            */
+            if (!vm_alloc_page(type, entry->va, entry->rw))
+            {
+                printf("FILE 페이지 카피 실패\n");
+                return false;
+            }
+            if (!vm_claim_page(entry->va))
+                return false;
+            struct page *page = spt_find_page(dst, entry->va);
+            page->file.file = file_reopen(entry->file.file);
+            page->file.offset = page->file.offset;
+            page->file.read_bytes = page->file.read_bytes;
+            page->file.zero_bytes = page->file.zero_bytes;
+            memcpy(page->va, entry->frame->kva, PGSIZE);
+        }
+        else
+        {
+            printf("무슨 타입이죠? %d\n", type);
+        }
     }
+
     // lock_release(&src->page_lock);
+
     return true;
 }
 

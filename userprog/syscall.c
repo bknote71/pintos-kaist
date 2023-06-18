@@ -45,7 +45,7 @@ static int set_file_to_nextfd(struct file *file);
 static void validate_address(void *ptr);
 
 static void fd_validate(int fd);
-static void mmap_validate(void *addr);
+static bool mmap_validate(void *addr, size_t length, off_t);
 
 /* System call.
  *
@@ -251,7 +251,7 @@ static int open(char *name)
 
     file = filesys_open(name);
     if (file == NULL)
-        return -1;
+        nextfd = -1;
     else
     {
         nextfd = set_file_to_nextfd(file);
@@ -324,21 +324,23 @@ static int read(int fd, void *buffer, size_t size)
 static void *mmap(void *addr, size_t length, int writable, int fd, off_t offset)
 {
     fd_validate(fd);
-    validate_address(addr);
-
-    if (((uint64_t)addr % PGSIZE) != 0)
-        exit(-1);
+    if (!mmap_validate(addr, length, offset))
+        return NULL;
+    // validate_address(addr);
 
     struct thread *curr = thread_current();
     struct file *file = get_file(fd);
 
-    if (length == 0)
-        exit(-1);
+    if (file == NULL)
+        return NULL;
 
     off_t filelength = file_length(file);
 
     if (length > filelength)
         length = filelength;
+
+    if (offset > length)
+        return NULL;
 
     return do_mmap(addr, length, writable, file, offset);
 }
@@ -411,11 +413,19 @@ static void fd_validate(int fd)
     }
 }
 
-static void mmap_validate(void *addr)
+static bool mmap_validate(void *addr, size_t length, off_t offset)
 {
-    if (((uint64_t)addr & ~PGSIZE))
-        exit(-1);
-    uint64_t *pml4 = thread_current()->pml4;
-    if (pml4_get_page(pml4, addr))
-        exit(-1);
+    if (addr == NULL || ((uint64_t)addr % PGSIZE))
+        return false;
+
+    if (!is_user_vaddr((uint64_t)addr) || !is_user_vaddr(addr + length))
+        return false;
+
+    if ((int)length <= 0)
+        return false;
+
+    if (offset > length)
+        return NULL;
+
+    return true;
 }
