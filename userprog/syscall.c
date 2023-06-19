@@ -89,7 +89,7 @@ void syscall_handler(struct intr_frame *f)
 
     curr->isp = f->rsp;
     int sysnum = f->R.rax;
-    // printf("sysnum: %d\n", sysnum);
+    printf("sysnum: %d\n", sysnum);
 
     switch (sysnum)
     {
@@ -341,8 +341,9 @@ static void *mmap(void *addr, size_t length, int writable, int fd, off_t offset)
 
     if (offset > length)
         return NULL;
-
-    return do_mmap(addr, length, writable, file, offset);
+    void *ret = do_mmap(addr, length, writable, file, offset);
+    // printf("ret: %p\n", ret);
+    return ret;
 }
 static void munmap(void *addr)
 {
@@ -355,17 +356,7 @@ static void munmap(void *addr)
     if (mf == NULL)
         exit(-1);
 
-    struct list *pagelist = &mf->page_list;
-    struct list_elem *p;
-
-    while (!list_empty(pagelist))
-    {
-        struct page *entry = list_entry(list_pop_front(pagelist), struct page, p_elem);
-        do_munmap(entry->va);
-    }
-    // 스레드에 mf 를 위한 락을 하나 설정해주자 나중에
-    list_remove(&mf->m_elem);
-    free(mf);
+    do_munmap(addr);
 }
 
 static struct file *
@@ -417,6 +408,12 @@ static bool mmap_validate(void *addr, size_t length, off_t offset)
 {
     if (addr == NULL || ((uint64_t)addr % PGSIZE))
         return false;
+
+    if (spt_find_page(&thread_current()->spt, addr))
+    {
+        // printf("실패\n");
+        return false;
+    }
 
     if (!is_user_vaddr((uint64_t)addr) || !is_user_vaddr(addr + length))
         return false;

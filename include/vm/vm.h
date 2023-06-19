@@ -128,5 +128,6 @@ bool vm_claim_page(void *va);
 enum vm_type page_get_type(struct page *page);
 
 bool setup_page_table(void *upage, void *kpage, bool writable);
+void vm_free_frame(struct frame *frame);
 
 #endif /* VM_VM_H */

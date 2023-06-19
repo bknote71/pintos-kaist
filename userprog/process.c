@@ -19,6 +19,7 @@
 #include <round.h>
 #include <stdio.h>
 #include <string.h>
+#define VM
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -297,13 +298,13 @@ process_cleanup(void)
     struct thread *curr = thread_current();
 
 #ifdef VM
-    // struct list *mlist = &curr->mmap_list;
-    // struct list_elem *p;
-    // while (!list_empty(mlist))
-    // {
-    //     struct mmap_file *mf = list_entry(list_pop_front(mlist), struct mmap_file, m_elem);
-    //     free(mf);
-    // }
+    struct list *mlist = &curr->mmap_list;
+    struct list_elem *p;
+    while (!list_empty(mlist))
+    {
+        struct mmap_file *mf = list_entry(list_front(mlist), struct mmap_file, m_elem);
+        do_munmap(mf->start);
+    }
     supplemental_page_table_kill(&curr->spt);
 #endif
 
@@ -713,7 +714,7 @@ lazy_load_segment(struct page *page, void *aux)
     size_t page_read_bytes = fp->read_bytes;
     size_t page_zero_bytes = fp->zero_bytes;
 
-    free(fp);
+    free(aux);
 
     /* Load this page. */
     if (file_read_at(file, kpage, page_read_bytes, offset) != (int)page_read_bytes)

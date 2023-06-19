@@ -79,7 +79,7 @@ anon_swap_out(struct page *page)
     ASSERT(page->frame != NULL);
 
     struct anon_page *anon_page = &page->anon;
-    uint64_t *pml4 = page->frame->th->pml4;
+    uint64_t *pml4 = thread_current()->pml4;
     void *buff = page->frame->kva;
     size_t offset;
 
@@ -95,7 +95,6 @@ anon_swap_out(struct page *page)
     }
 
     anon_page->offset = offset;
-    page->frame->page = NULL;
     page->frame = NULL;
     pml4_clear_page(pml4, page->va);
 
@@ -111,8 +110,7 @@ anon_destroy(struct page *page)
 
     if (frame != NULL) // frame 해제
     {
-        uint64_t *pml4 = frame->th->pml4;
-        pml4_clear_page(pml4, page->va);
+        vm_free_frame(frame);
     }
 
     if (anon_page->offset != -1)
