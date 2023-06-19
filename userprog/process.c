@@ -300,11 +300,13 @@ process_cleanup(void)
 #ifdef VM
     struct list *mlist = &curr->mmap_list;
     struct list_elem *p;
+
     while (!list_empty(mlist))
     {
         struct mmap_file *mf = list_entry(list_front(mlist), struct mmap_file, m_elem);
         do_munmap(mf->start);
     }
+
     supplemental_page_table_kill(&curr->spt);
 #endif
 

@@ -104,9 +104,6 @@ do_mmap(void *addr, size_t length, int writable,
         return NULL;
     }
 
-    if (writable == 0)
-        file_deny_write(refile);
-
     list_init(&mf->page_list);
     list_push_back(&curr->mmap_list, &mf->m_elem);
 
@@ -145,11 +142,15 @@ do_mmap(void *addr, size_t length, int writable,
 void do_munmap(void *addr)
 {
     struct supplemental_page_table *spt = &thread_current()->spt;
-    struct file *file = spt_find_page(spt, addr)->file.file;
+    struct page *page = spt_find_page(spt, addr);
+    if (page->operations->type == VM_UNINIT)
+    {
+        vm_claim_page(addr);
+    }
+    struct file *file = page->file.file;
     struct mmap_file *mf = find_mmfile(addr);
     struct list *pagelist = &mf->page_list;
 
-    struct page *page;
     struct list_elem *p;
     while (!list_empty(pagelist))
     {

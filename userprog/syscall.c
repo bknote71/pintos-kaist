@@ -89,7 +89,7 @@ void syscall_handler(struct intr_frame *f)
 
     curr->isp = f->rsp;
     int sysnum = f->R.rax;
-    printf("sysnum: %d\n", sysnum);
+    // printf("sysnum: %d\n", sysnum);
 
     switch (sysnum)
     {
@@ -256,11 +256,12 @@ static int open(char *name)
     {
         nextfd = set_file_to_nextfd(file);
         if (nextfd == -1)
+        {
             file_close(file);
+        }
     }
 
     lock_release(&filesys_lock);
-
     return nextfd;
 }
 static int write(int fd, void *buffer, size_t size)
@@ -325,7 +326,9 @@ static void *mmap(void *addr, size_t length, int writable, int fd, off_t offset)
 {
     fd_validate(fd);
     if (!mmap_validate(addr, length, offset))
+    {
         return NULL;
+    }
     // validate_address(addr);
 
     struct thread *curr = thread_current();
@@ -341,9 +344,8 @@ static void *mmap(void *addr, size_t length, int writable, int fd, off_t offset)
 
     if (offset > length)
         return NULL;
-    void *ret = do_mmap(addr, length, writable, file, offset);
-    // printf("ret: %p\n", ret);
-    return ret;
+
+    return do_mmap(addr, length, writable, file, offset);
 }
 static void munmap(void *addr)
 {
@@ -411,7 +413,6 @@ static bool mmap_validate(void *addr, size_t length, off_t offset)
 
     if (spt_find_page(&thread_current()->spt, addr))
     {
-        // printf("실패\n");
         return false;
     }
 
