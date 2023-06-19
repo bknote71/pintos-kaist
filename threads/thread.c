@@ -116,7 +116,7 @@ static bool sleep_sort(const struct list_elem *a, const struct list_elem *b,
 
 void priority_yield(void)
 {
-    if (!list_empty(&ready_list) &&
+    if (!intr_context() && !list_empty(&ready_list) &&
         list_entry(list_front(&ready_list), struct thread, elem)->priority > thread_current()->priority)
         thread_yield();
 }

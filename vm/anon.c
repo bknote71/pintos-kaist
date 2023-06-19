@@ -33,7 +33,7 @@ void vm_anon_init(void)
     // 페이지 사이즈: 4KB, 섹터 사이즈: 512 B: 8 개의 섹터 = 1 Swap slot
     // 따라서 스왑 디스크의 섹터 개수 / 8 = Swap slot 개수
     swap_disk = disk_get(1, 1);
-    sectors = disk_size(swap_disk);
+    sectors = disk_size(swap_disk) / SLOT;
     swap_bitmap = bitmap_create(sectors);
 }
 
@@ -44,7 +44,7 @@ bool anon_initializer(struct page *page, enum vm_type type, void *kva)
     page->operations = &anon_ops;
 
     struct anon_page *anon_page = &page->anon;
-    anon_page->offset = 0;
+    anon_page->offset = -1;
 
     return true;
 }
@@ -56,12 +56,18 @@ anon_swap_in(struct page *page, void *kva)
     ASSERT(page != NULL);
 
     struct anon_page *anon_page = &page->anon;
-    for (int i = 0; i < SLOT; ++i)
+    size_t offset = anon_page->offset;
+
+    if (bitmap_test(swap_bitmap, offset) == 0)
     {
-        disk_read(swap_disk, anon_page->offset + i, kva + (i * DISK_SECTOR_SIZE));
-        bitmap_flip(swap_bitmap, anon_page->offset + i);
+        PANIC("스왑디스크에 없음. 따라서 swap in 못함!");
     }
 
+    for (int i = 0; i < SLOT; ++i)
+    {
+        disk_read(swap_disk, offset * SLOT + i, kva + (i * DISK_SECTOR_SIZE));
+    }
+    bitmap_flip(swap_bitmap, offset);
     return true;
 }
 
@@ -70,27 +76,28 @@ static bool
 anon_swap_out(struct page *page)
 {
     ASSERT(page != NULL);
+    ASSERT(page->frame != NULL);
 
     struct anon_page *anon_page = &page->anon;
     uint64_t *pml4 = page->frame->th->pml4;
-    void *buff;
+    void *buff = page->frame->kva;
     size_t offset;
 
-    buff = page->frame->kva;
-    page->frame = NULL;
-    pml4_clear_page(pml4, page->va);
-
-    offset = bitmap_scan_and_flip(swap_bitmap, 0, SLOT, 0);
-    if (offset == BITMAP_ERROR)
+    if ((offset = bitmap_scan_and_flip(swap_bitmap, 0, 1, 0)) == BITMAP_ERROR)
     {
-        return false;
+        PANIC("bitmap error");
     }
-    anon_page->offset = offset;
+
     // 512 바이트 단위로 끊어서 작성? 8 번
     for (int i = 0; i < SLOT; ++i)
     {
-        disk_write(swap_disk, offset + i, buff + (i * DISK_SECTOR_SIZE));
+        disk_write(swap_disk, offset * SLOT + i, buff + (i * DISK_SECTOR_SIZE));
     }
+
+    anon_page->offset = offset;
+    page->frame->page = NULL;
+    page->frame = NULL;
+    pml4_clear_page(pml4, page->va);
 
     return true;
 }
@@ -101,15 +108,13 @@ anon_destroy(struct page *page)
 {
     struct anon_page *anon_page = &page->anon;
     struct frame *frame = page->frame;
-    size_t offset;
+
     if (frame != NULL) // frame 해제
     {
         uint64_t *pml4 = frame->th->pml4;
         pml4_clear_page(pml4, page->va);
-        vm_free_frame(frame);
     }
-    else if ((offset = bitmap_scan(swap_bitmap, anon_page->offset, SLOT, 1)) == anon_page->offset) // in swap space
-    {
-        bitmap_set_multiple(swap_bitmap, offset, 8, 0);
-    }
+
+    if (anon_page->offset != -1)
+        bitmap_set(swap_bitmap, anon_page->offset, 0);
 }

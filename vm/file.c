@@ -41,7 +41,6 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
 static bool
 file_backed_swap_in(struct page *page, void *kva)
 {
-    printf("file_backed swapin\n");
     struct file_page *file_page = &page->file;
     size_t page_read_bytes = file_page->read_bytes;
     size_t page_zero_bytes = file_page->zero_bytes;
@@ -67,8 +66,10 @@ file_backed_swap_out(struct page *page)
         file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
         pml4_set_dirty(pml4, page->va, 0);
     }
-    pml4_clear_page(pml4, page->va);
+
+    page->frame->page = NULL;
     page->frame = NULL;
+    pml4_clear_page(pml4, page->va);
 
     return true;
 }
@@ -90,7 +91,6 @@ file_backed_destroy(struct page *page)
             pml4_set_dirty(pml4, page->va, 0);
         }
         pml4_clear_page(pml4, page->va);
-        vm_free_frame(frame);
     }
     // finally file close ??????
     file_close(file_page->file);

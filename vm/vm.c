@@ -10,6 +10,7 @@
 #define USER_STACK_LIMIT (1 << 20)
 
 static struct list lru_list;
+static struct lock lru_lock;
 
 static bool validate_fault(void *addr, bool user, bool not_present);
 static uint64_t page_hash(const struct hash_elem *e, void *aux);
@@ -144,35 +145,32 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
 static struct frame *
 vm_get_victim(void)
 {
-    struct frame *victim = NULL;
+    printf("vm get victim\n");
     struct frame *frame = NULL;
     /* TODO: The policy for eviction is up to you. */
-    while (victim == NULL)
+    struct list_elem *p;
+    lock_acquire(&lru_lock);
+
+    for (p = list_begin(&lru_list); p != list_end(&lru_list); p = list_next(p))
     {
-        struct list_elem *p;
-        lock_acquire(&lru_lock);
-
-        for (p = list_begin(&lru_list); p != list_end(&lru_list); p = list_next(p))
+        frame = list_entry(p, struct frame, l_elem);
+        uint64_t *pml4 = frame->th->pml4;
+        // find pte
+        if (frame->page == NULL)
         {
-            frame = list_entry(p, struct frame, l_elem);
-            uint64_t *pml4 = frame->th->pml4;
-            void *va = frame->page->va;
-            // find pte
-            if (pml4_is_accessed(pml4, va))
-                pml4_set_accessed(pml4, va, 0);
-            else if (pml4_is_dirty(pml4, va))
-                ;
-            else
-            {
-                victim = frame;
-                list_remove(p);
-                break;
-            }
+            break;
         }
-
-        lock_release(&lru_lock);
+        if (pml4_is_accessed(pml4, frame->page->va))
+            pml4_set_accessed(pml4, frame->page->va, 0);
+        else
+        {
+            break;
+        }
     }
-    return victim;
+
+    lock_release(&lru_lock);
+    printf("vm get victim 완\n");
+    return frame;
 }
 
 /* Evict one page and return the corresponding frame.
@@ -182,8 +180,8 @@ vm_evict_frame(void)
 {
     struct frame *victim = vm_get_victim();
     /* TODO: swap out the victim and return the evicted frame. */
-    swap_out(victim->page);
-    victim->page = NULL;
+    if (victim->page != NULL)
+        swap_out(victim->page);
     return victim;
 }
 
@@ -200,6 +198,7 @@ vm_get_frame(void)
     if ((kva = palloc_get_page(PAL_USER | PAL_ZERO)) == NULL)
     {
         frame = vm_evict_frame();
+        frame->page = NULL;
         frame->th = thread_current();
         return frame;
     }
@@ -218,18 +217,6 @@ vm_get_frame(void)
     ASSERT(frame->page == NULL);
 
     return frame;
-}
-
-void vm_free_frame(struct frame *frame)
-{
-    ASSERT(frame != NULL);
-
-    lock_acquire(&lru_lock);
-    list_remove(&frame->l_elem);
-    lock_release(&lru_lock);
-
-    palloc_free_page(frame->kva);
-    free(frame);
 }
 
 /* Growing the stack. */
@@ -276,9 +263,6 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
     // addr to page addr, abs??
     void *va = pg_round_down(addr);
     page = spt_find_page(spt, va);
-    // printf("%p, %p, page find 성공? %d\n", addr, va, page != NULL);
-    // if (page == NULL || page->rw < write)
-    //     return false;
 
     if (page == NULL) // stack growth 가능성?
     {
@@ -293,20 +277,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 
     if (page != NULL)
     {
-        vmtype = page_get_type(page);
-
-        switch (vmtype)
-        {
-        case VM_ANON:
-            success = vm_do_claim_page(page);
-            break;
-        case VM_FILE:
-            success = vm_do_claim_page(page);
-            break;
-
-        default:
-            break;
-        }
+        success = vm_do_claim_page(page);
     }
     else if (stack_growth)
         vm_stack_growth(addr);
@@ -324,8 +295,7 @@ static bool validate_fault(void *addr, bool user, bool not_present)
     if (is_kernel_vaddr(addr))
     {
         // 커널에서 페이지 폴트? 그냥 palloc ??
-        if (user)
-            return false;
+        return false;
     }
     return true;
 }
@@ -389,31 +359,40 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED)
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
                                   struct supplemental_page_table *src UNUSED)
 {
+    printf("copy 시작\n");
     struct hash_iterator iter;
     struct page *new_page;
     struct page *entry;
     enum vm_type type;
 
-    // lock_acquire(&src->page_lock);
+    lock_acquire(&src->page_lock);
 
     hash_first(&iter, &src->pages);
     while (hash_next(&iter))
     {
         entry = hash_entry(hash_cur(&iter), struct page, h_elem);
-        type = entry->operations->type; // 3 가지 케이스만: uninit, anon, file
+        type = entry->operations->type;
+
+        if (entry->frame == NULL)
+        {
+            printf("frame is null, so we have to swap in entry << \n");
+        }
 
         if (type == VM_UNINIT)
         {
-            // copy 를 해야할까요?
-            vm_initializer *init = entry->uninit.init;
             void *aux = entry->uninit.aux;
-            if (init != NULL)
+            struct file_page *fp = NULL;
+            if (aux != NULL)
             {
-                aux = (struct file_page *)malloc(sizeof(struct file_page));
-                memcpy(aux, entry->uninit.aux, sizeof(struct file_page));
+                fp = (struct file_page *)malloc(sizeof(struct file_page));
+                struct file_page *tp = (struct file_page *)aux;
+                fp->file = file_reopen(tp->file); // 아직 process 의 load_segment 에는 file_reopen 을 안해줌. 나중에 하고, 그리고 uninit_destroy 에서 file_close 를 호출해야 함!!
+                fp->offset = tp->offset;
+                fp->read_bytes = tp->read_bytes;
+                fp->zero_bytes = tp->zero_bytes;
             }
 
-            vm_alloc_page_with_initializer(page_get_type(entry), entry->va, entry->rw, init, aux);
+            vm_alloc_page_with_initializer(page_get_type(entry), entry->va, entry->rw, entry->uninit.init, fp);
         }
         else if (type == VM_ANON)
         {
@@ -460,8 +439,8 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
         }
     }
 
-    // lock_release(&src->page_lock);
-
+    lock_release(&src->page_lock);
+    printf("copy 끝\n");
     return true;
 }
 
