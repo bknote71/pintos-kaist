@@ -107,10 +107,10 @@ spt_find_page(struct supplemental_page_table *spt UNUSED, void *va UNUSED)
     tp.va = va;
 
     /* TODO: Fill this function. */
-    // lock_acquire(&spt->page_lock);
+    lock_acquire(&spt->page_lock);
     hm = hash_find(&spt->pages, &tp.h_elem);
     page = hash_entry(hm, struct page, h_elem);
-    // lock_release(&spt->page_lock);
+    lock_release(&spt->page_lock);
 
     return hm != NULL ? page : NULL;
 }
@@ -128,9 +128,9 @@ bool spt_insert_page(struct supplemental_page_table *spt UNUSED,
         return false;
     }
 
-    // lock_acquire(&spt->page_lock);
+    lock_acquire(&spt->page_lock);
     hm = hash_insert(&spt->pages, &page->h_elem);
-    // lock_release(&spt->page_lock);
+    lock_release(&spt->page_lock);
 
     return hm == NULL;
 }
@@ -395,7 +395,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             {
                 fp = (struct file_page *)malloc(sizeof(struct file_page));
                 struct file_page *tp = (struct file_page *)aux;
-                fp->file = tp->file;
+                fp->file = real_type == VM_FILE ? file_reopen(tp->file) : tp->file;
                 fp->offset = tp->offset;
                 fp->read_bytes = tp->read_bytes;
                 fp->zero_bytes = tp->zero_bytes;
@@ -424,6 +424,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
         }
         else if (type == VM_FILE)
         {
+            // 뭘
             /*
                 file reopen << 꼭ㄴ
                 file 의 오프셋은 카피를 해야할까? 그래야하지 않을까?
@@ -436,12 +437,12 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             }
             if (!vm_claim_page(entry->va))
                 return false;
-            // struct page *page = spt_find_page(dst, entry->va);
-            // page->file.file = file_reopen(entry->file.file);
-            // page->file.offset = page->file.offset;
-            // page->file.read_bytes = page->file.read_bytes;
-            // page->file.zero_bytes = page->file.zero_bytes;
-            // memcpy(page->va, entry->frame->kva, PGSIZE);
+            struct page *page = spt_find_page(dst, entry->va);
+            page->file.file = file_reopen(entry->file.file);
+            page->file.offset = entry->file.offset;
+            page->file.read_bytes = entry->file.read_bytes;
+            page->file.zero_bytes = entry->file.zero_bytes;
+            memcpy(page->va, entry->frame->kva, PGSIZE);
         }
     }
 
