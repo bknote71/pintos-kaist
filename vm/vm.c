@@ -425,7 +425,6 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
         }
         else if (type == VM_FILE)
         {
-            printf("copy vm file\n");
             /*
                 file reopen << 꼭ㄴ
                 file 의 오프셋은 카피를 해야할까? 그래야하지 않을까?
@@ -433,7 +432,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             */
             struct file_page *fp = (struct file_page *)malloc(sizeof(struct file_page));
             struct file_page tp = (struct file_page)entry->file;
-            fp->file = tp.file;
+            fp->file = tp.file; // read 용 파일
             fp->offset = tp.offset;
             fp->read_bytes = tp.read_bytes;
             fp->zero_bytes = tp.zero_bytes;
@@ -471,7 +470,9 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             if ((dstpage = spt_find_page(dst, srcpage->va)) == NULL)
             {
                 printf("위에서 카피를 잘못함\n");
+                return false;
             }
+            dstpage->file.file = newmf->file;
             list_push_back(&newmf->page_list, &dstpage->p_elem);
         }
     }
