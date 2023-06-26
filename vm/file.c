@@ -104,6 +104,7 @@ do_mmap(void *addr, size_t length, int writable,
         return NULL;
     }
 
+    mf->file = refile;
     list_init(&mf->page_list);
     list_push_back(&curr->mmap_list, &mf->m_elem);
 
@@ -143,6 +144,7 @@ void do_munmap(void *addr)
 {
     struct supplemental_page_table *spt = &thread_current()->spt;
     struct page *page = spt_find_page(spt, addr);
+
     if (page->operations->type == VM_UNINIT)
     {
         vm_claim_page(addr);

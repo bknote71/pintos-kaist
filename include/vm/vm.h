@@ -102,6 +102,7 @@ struct supplemental_page_table
 {
     struct hash pages;
     struct lock page_lock;
+    struct thread *th;
 };
 
 #include "threads/thread.h"

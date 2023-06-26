@@ -16,6 +16,7 @@ struct file_page
 
 struct mmap_file
 {
+    struct file *file;
     void *start;
     struct list_elem m_elem;
     struct list page_list;

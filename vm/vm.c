@@ -362,6 +362,7 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED)
 {
     hash_init(&spt->pages, page_hash, page_less, NULL);
     lock_init(&spt->page_lock);
+    spt->th = thread_current();
 }
 
 /* Copy supplemental page table from src to dst */
@@ -374,7 +375,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
     enum vm_type type;
 
     lock_acquire(&src->page_lock);
-
+    // page copy
     hash_first(&iter, &src->pages);
     while (hash_next(&iter))
     {
@@ -384,24 +385,24 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
         if (entry->frame == NULL)
         {
             // printf("frame is null, so we have to swap in entry << \n");
+            // 이건 처리를 어떻게 해야할까?
         }
 
         if (type == VM_UNINIT)
         {
             void *aux = entry->uninit.aux;
-            enum vm_type real_type = page_get_type(entry);
             struct file_page *fp = NULL;
             if (aux != NULL)
             {
                 fp = (struct file_page *)malloc(sizeof(struct file_page));
                 struct file_page *tp = (struct file_page *)aux;
-                fp->file = real_type == VM_FILE ? file_reopen(tp->file) : tp->file;
+                fp->file = tp->file;
                 fp->offset = tp->offset;
                 fp->read_bytes = tp->read_bytes;
                 fp->zero_bytes = tp->zero_bytes;
             }
 
-            vm_alloc_page_with_initializer(real_type, entry->va, entry->rw, entry->uninit.init, fp);
+            vm_alloc_page_with_initializer(page_get_type(entry), entry->va, entry->rw, entry->uninit.init, fp);
         }
         else if (type == VM_ANON)
         {
@@ -424,29 +425,57 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
         }
         else if (type == VM_FILE)
         {
-            // 뭘
+            printf("copy vm file\n");
             /*
                 file reopen << 꼭ㄴ
                 file 의 오프셋은 카피를 해야할까? 그래야하지 않을까?
                 원본이 쓰기중인 오프셋을 가지고 있다면, 당연히 거기서부터 시작해야 하는게 맞잖아
             */
-            if (!vm_alloc_page(type, entry->va, entry->rw))
+            struct file_page *fp = (struct file_page *)malloc(sizeof(struct file_page));
+            struct file_page tp = (struct file_page)entry->file;
+            fp->file = tp.file;
+            fp->offset = tp.offset;
+            fp->read_bytes = tp.read_bytes;
+            fp->zero_bytes = tp.zero_bytes;
+            if (!vm_alloc_page_with_initializer(type, entry->va, entry->rw, load_file, fp))
             {
                 printf("FILE 페이지 카피 실패\n");
                 return false;
             }
             if (!vm_claim_page(entry->va))
                 return false;
-            struct page *page = spt_find_page(dst, entry->va);
-            page->file.file = file_reopen(entry->file.file);
-            page->file.offset = entry->file.offset;
-            page->file.read_bytes = entry->file.read_bytes;
-            page->file.zero_bytes = entry->file.zero_bytes;
-            memcpy(page->va, entry->frame->kva, PGSIZE);
         }
     }
 
     lock_release(&src->page_lock);
+
+    // mmap_file copy
+    struct list *srcmlist = &(src->th->mmap_list);
+    struct list *dstmlist = &(dst->th->mmap_list);
+    struct page *srcpage, *dstpage;
+    struct list_elem *p, *q;
+
+    for (p = list_begin(srcmlist); p != list_end(srcmlist); p = list_next(p))
+    {
+        struct mmap_file *mf = list_entry(p, struct mmap_file, m_elem);
+        struct mmap_file *newmf = malloc(sizeof(struct mmap_file));
+        // mmap_file 당 file_reopen 을 한번씩 해야한다.
+        newmf->start = mf->start;
+        newmf->file = file_reopen(mf->file);
+        list_init(&newmf->page_list);
+        list_push_back(dstmlist, &newmf->m_elem);
+
+        for (q = list_begin(&(mf->page_list)); q != list_end(&(mf->page_list)); q = list_next(q))
+        {
+            struct page *srcpage = list_entry(q, struct page, p_elem);
+            if ((dstpage = spt_find_page(dst, srcpage->va)) == NULL)
+            {
+                printf("위에서 카피를 잘못함\n");
+            }
+            list_push_back(&newmf->page_list, &dstpage->p_elem);
+        }
+    }
+
     return true;
 }
 
