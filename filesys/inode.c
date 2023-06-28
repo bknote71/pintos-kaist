@@ -352,11 +352,18 @@ static cluster_t
 byte_to_cluster(const struct inode *inode, off_t pos)
 {
     ASSERT(inode != NULL);
+
+    cluster_t fclst;
+    int clusters;
+
     // pos 가 위치한 클러스터 번호
     if (pos >= inode->length)
         return -1;
-    int clusters = pos / (DISK_SECTOR_SIZE * SECTORS_PER_CLUSTER);
-    cluster_t fclst = find_cluster_after_clusters(inode->sclst, clusters);
+
+    clusters = pos / (DISK_SECTOR_SIZE * SECTORS_PER_CLUSTER);
+    if ((fclst = find_cluster_after_clusters(inode->sclst, clusters)) == -1)
+        return -1;
+
     return cluster_to_sector(fclst);
 }
 
@@ -379,14 +386,17 @@ bool inode_create_by_fat(cluster_t *newclst, off_t length)
             clst = fat_create_chain(clst);
 
             if (clst == 0)
+            {
+                fat_remove_chain(*newclst, 0);
                 return false;
+            }
 
             if (i == 0)
             {
                 *newclst = clst;
             }
 
-            disk_write(filesys_disk, cluster_to_sector(newclst), zeros);
+            disk_write(filesys_disk, cluster_to_sector(clst), zeros);
         }
     }
 
@@ -513,18 +523,46 @@ off_t inode_write_at_by_fat(struct inode *inode, const void *buffer_, off_t size
     const uint8_t *buffer = buffer_;
     off_t bytes_written = 0;
     uint8_t *bounce = NULL;
+    cluster_t sclst;
 
     if (inode->deny_write_cnt)
         return 0;
 
+    // extend??
+    while ((sclst = byte_to_cluster(inode, offset + size)) != -1)
+    {
+        off_t flength = inode->length;
+        cluster_t eoc = byte_to_sector(inode, flength - 1);
+        sclst = fat_create_chain(eoc); // sclst 가 0 이면 새로운 공간을 할당하지 못한 것.
+
+        int file_ofs = flength % (DISK_SECTOR_SIZE);
+        int ofs_left = DISK_SECTOR_SIZE - file_ofs;
+        if (file_ofs != 0) // 이제 length 는 DISK_SECTOR_SIZE 의 배수
+            inode->length += ofs_left;
+
+        // 기존 EoF 보다 pos 가 컸다면 그 사이에는 zero 로 채워야 한다.
+        int zero_bytes = (offset + size) - inode->length;
+        zero_bytes = zero_bytes < DISK_SECTOR_SIZE ? zero_bytes : DISK_SECTOR_SIZE;
+        if (zero_bytes <= 0)
+            break;
+        // zero 가 DISK_SECTOR 보다 작다면 ofs 만큼 zero 로 채워야 한다.
+        uint8_t *zbuf = malloc(DISK_SECTOR_SIZE);
+        if (zero_bytes != DISK_SECTOR_SIZE)
+            disk_read(filesys_disk, cluster_to_sector(sclst), zbuf);
+
+        else
+            memset(zbuf, 0, sizeof(zbuf));
+        memset(zbuf, 0, zero_bytes);
+        disk_write(filesys_disk, cluster_to_sector(sclst), zbuf);
+
+        inode->length += zero_bytes;
+        free(buffer);
+    }
+
     while (size > 0)
     {
         /* Sector to write, starting byte offset within sector. */
-        cluster_t sclst = byte_to_cluster(inode, offset);
-        if (sclst == -1)
-        {
-            // extend??
-        }
+        sclst = byte_to_cluster(inode, offset);
         disk_sector_t sector_idx = cluster_to_sector(sclst);
         int sector_ofs = offset % (DISK_SECTOR_SIZE * SECTORS_PER_CLUSTER);
 
