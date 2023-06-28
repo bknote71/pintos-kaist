@@ -153,6 +153,9 @@ struct thread
 
     /* for mmap */
     struct list mmap_list;
+
+    /* hierarchical directory */
+    struct dir *cur_dir;
 };
 
 /* If false (default), use round-robin scheduler.

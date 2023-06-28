@@ -31,6 +31,7 @@ bool dir_readdir(struct dir *, char name[NAME_MAX + 1]);
 
 /* FAT */
 bool dir_add_by_fat(struct dir *dir, const char *name, cluster_t, off_t initial_size);
-off_t length_by_clst(const struct dir *dir, const cluster_t);
+off_t length_by_clst(const cluster_t clst);
+struct dir *get_subdir(char **didrs, int dcnt, bool absolute);
 
 #endif /* filesys/directory.h */

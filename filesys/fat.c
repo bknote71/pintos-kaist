@@ -259,3 +259,9 @@ find_cluster_after_clusters(cluster_t sclst, int clusters)
     }
     return p;
 }
+
+int *allocate_length_array()
+{
+    int *ret = calloc(fat_fs->fat_length, sizeof(int));
+    return ret;
+}

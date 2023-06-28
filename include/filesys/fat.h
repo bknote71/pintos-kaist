@@ -36,4 +36,5 @@ void fat_put(cluster_t clst, cluster_t val);
 disk_sector_t cluster_to_sector(cluster_t clst);
 cluster_t
 find_cluster_after_clusters(cluster_t sclst, int clusters);
+int *allocate_length_array();
 #endif /* filesys/fat.h */

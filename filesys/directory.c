@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "threads/thread.h"
+
 /* A directory. */
 struct dir
 {
@@ -23,6 +25,8 @@ struct dir_entry
     char name[NAME_MAX + 1]; /* Null terminated file name. */
     bool in_use;             /* In use or free? */
 };
+
+static int *file_length_arr;
 
 /* Creates a directory with space for ENTRY_CNT entries in the
  * given SECTOR.  Returns true if successful, false on failure. */
@@ -155,19 +159,6 @@ bool dir_lookup(const struct dir *dir, const char *name,
     return *inode != NULL;
 }
 
-off_t length_by_clst(const struct dir *dir, const cluster_t clst)
-{
-    struct dir_entry e;
-
-    ASSERT(dir != NULL);
-    ASSERT(clst > 0);
-
-    if (lookup_by_clst(dir, clst, &e, NULL))
-        return e.length;
-
-    return 0;
-}
-
 /* Adds a file named NAME to DIR, which must not already contain a
  * file by that name.  The file's inode is in sector
  * INODE_SECTOR.
@@ -213,6 +204,27 @@ done:
     return success;
 }
 
+/* Reads the next directory entry in DIR and stores the name in
+ * NAME.  Returns true if successful, false if the directory
+ * contains no more entries. */
+bool dir_readdir(struct dir *dir, char name[NAME_MAX + 1])
+{
+    struct dir_entry e;
+
+    while (inode_read_at(dir->inode, &e, sizeof e, dir->pos) == sizeof e)
+    {
+        dir->pos += sizeof e;
+        if (e.in_use)
+        {
+            strlcpy(name, e.name, NAME_MAX + 1);
+            return true;
+        }
+    }
+    return false;
+}
+
+// FAT
+
 bool dir_add_by_fat(struct dir *dir, const char *name, cluster_t clst, off_t initial_size)
 {
     struct dir_entry e;
@@ -248,6 +260,11 @@ bool dir_add_by_fat(struct dir *dir, const char *name, cluster_t clst, off_t ini
     e.cluster_no = clst;
     e.length = initial_size;
     success = inode_write_at(dir->inode, &e, sizeof e, ofs) == sizeof e;
+
+    if (file_length_arr == NULL)
+        file_length_arr = allocate_length_array();
+
+    file_length_arr[e.cluster_no] = e.length;
 
 done:
     return success;
@@ -289,21 +306,32 @@ done:
     return success;
 }
 
-/* Reads the next directory entry in DIR and stores the name in
- * NAME.  Returns true if successful, false if the directory
- * contains no more entries. */
-bool dir_readdir(struct dir *dir, char name[NAME_MAX + 1])
+off_t length_by_clst(const cluster_t clst)
 {
-    struct dir_entry e;
+    return file_length_arr[clst];
+}
 
-    while (inode_read_at(dir->inode, &e, sizeof e, dir->pos) == sizeof e)
+struct dir *get_subdir(char **dirs, int dcnt, bool absolute)
+{
+    // dirs 끝까지 가야함 dir_open + dir_lookup 조합
+    struct dir *dir = NULL;
+    struct dir *p = NULL;
+    struct inode *inode = NULL;
+
+    if (absolute)
+        dir = dir_open_root();
+    else
+        dir = dir_reopen(thread_current()->cur_dir);
+
+    for (int i = absolute; i < dcnt - (absolute); ++i)
     {
-        dir->pos += sizeof e;
-        if (e.in_use)
-        {
-            strlcpy(name, e.name, NAME_MAX + 1);
-            return true;
-        }
+        if (!dir_lookup(dir, dirs[i], &inode))
+            return NULL;
+
+        p = dir;
+        dir = dir_open(inode);
+        dir_close(p);
     }
-    return false;
+
+    return dir;
 }

@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#define EFILESYS
+
 /* The disk that contains the file system. */
 struct disk *filesys_disk;
 
@@ -54,6 +56,44 @@ void filesys_done(void)
 #endif
 }
 
+static struct path *
+parse_filename(const char *filename)
+{
+    int flength;
+    if ((flength = strlen(filename)) == 0)
+        return NULL;
+
+    struct path *path = malloc(sizeof(struct path));
+    path->dirs = calloc(sizeof(char *), 30);
+
+    char tmp_name[20] = { 0 };
+    strlcpy(tmp_name, filename, flength + 1);
+
+    path->absolute = (filename[0] == '/');
+    if (path->absolute)
+        path->dirs[path->dcnt++] = "/";
+
+    char *token, *save;
+    token = strtok_r(tmp_name, "/", save);
+    while (token != NULL)
+    {
+        path->dirs[path->dcnt++] = token;
+        token = strtok_r(NULL, "/", save);
+    }
+
+    path->dcnt -= 1;
+    path->filename = path->dirs[path->dcnt];
+
+    return path;
+}
+
+static void
+path_close(struct path *path)
+{
+    free(path->dirs);
+    free(path);
+}
+
 /* Creates a file named NAME with the given INITIAL_SIZE.
  * Returns true if successful, false otherwise.
  * Fails if a file named NAME already exists,
@@ -61,21 +101,32 @@ void filesys_done(void)
 bool filesys_create(const char *name, off_t initial_size)
 {
     disk_sector_t inode_sector = 0;
-    struct dir *dir = dir_open_root();
-    bool success = (dir != NULL && free_map_allocate(1, &inode_sector) && inode_create(inode_sector, initial_size) && dir_add(dir, name, inode_sector));
+    struct path *path = parse_filename(name);
+
+    struct dir *dir = find_subdir(path->dirs, path->dcnt, path->absolute);
+
+    bool success = false;
+    struct inode *inode = NULL;
+    if (dir_lookup(dir, path->filename, &inode))
+        goto done;
+
+#ifdef EFILESYS
+
+    success = (dir != NULL &&
+               inode_create_by_fat(&inode_sector, initial_size) &&
+               dir_add_by_fat(dir, path->filename, inode_sector, initial_size));
+
+#else
+
+    success = (dir != NULL && free_map_allocate(1, &inode_sector) && inode_create(inode_sector, initial_size, false) && dir_add(dir, name, inode_sector));
     if (!success && inode_sector != 0)
         free_map_release(inode_sector, 1);
-    dir_close(dir);
 
-    return success;
-}
+#endif
 
-bool filesys_create_by_fat(const char *name, off_t initial_size)
-{
-    cluster_t cluster_no = 0;
-    struct dir *dir = dir_open_root();
-    bool success = (dir != NULL && inode_create(&cluster_no, initial_size) && dir_add_by_fat(dir, name, cluster_no, initial_size));
+done:
     dir_close(dir);
+    path_close(path);
 
     return success;
 }
