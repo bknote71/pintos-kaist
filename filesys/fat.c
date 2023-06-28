@@ -248,3 +248,14 @@ cluster_to_sector(cluster_t clst)
     }
     return ret;
 }
+
+cluster_t
+find_cluster_after_clusters(cluster_t sclst, int clusters)
+{
+    cluster_t p = sclst;
+    for (int i = 0; i < clusters - 1; ++i)
+    {
+        p = fat_fs->fat[p];
+    }
+    return p;
+}

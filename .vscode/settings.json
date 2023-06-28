@@ -51,7 +51,10 @@
     "stdbool.h": "c",
     "synch.h": "c",
     "palloc.h": "c",
-    "process.h": "c"
+    "process.h": "c",
+    "fat.h": "c",
+    "stddef.h": "c",
+    "disk.h": "c"
   },
   "C_Cpp.dimInactiveRegions": false
 }
